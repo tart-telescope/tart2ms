@@ -16,11 +16,14 @@ import dask.array as da
 
 import numpy as np
 
+from casacore.measures import measures
+
 from daskms import Dataset, xds_to_table
 
 import astropy.units as u
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy.utils import iers
 
 from tart.util import constants
 
@@ -109,6 +112,27 @@ class MSTable:
         dask.compute(writes)
 
 
+def timestamp_to_ms_epoch(ts):
+    ''' Convert an timestamp to seconds (epoch values)
+        epoch suitable for using in a Measurement Set
+        
+    Parameters
+    ----------
+    ts : function or method
+       A timestamp object.
+
+    Returns
+    -------
+    t : float
+      The epoch time ``t`` in seconds suitable for fields in 
+      measurement sets.
+    '''
+    dm = measures()    
+    epoch_d = dm.epoch(rf='utc', v0=ts.isoformat())['m0']['value']
+    epoch_s = epoch_d*24*60*60.0
+    return epoch_s
+
+
 def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sources):
     '''    "info": {
         "info": {
@@ -127,18 +151,26 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
         }
     },
     '''
+
+    epoch_s = timestamp_to_ms_epoch(timestamps)
+    LOGGER.info("Time {}".format(epoch_s))
+
     loc = info['location']
+    # Sort out the coordinate frames
+    # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
+    iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all' 
+    iers.conf.auto_max_age = None 
+
     location = EarthLocation.from_geodetic(lon=loc['lon']*u.deg,
                                            lat=loc['lat']*u.deg,
                                            height=loc['alt']*u.m,
                                            ellipsoid='WGS84')
+    obstime = Time(timestamps)
+    local_frame = AltAz(obstime=obstime, location=location)
 
-    time = Time(timestamps)
-    local_frame = AltAz(obstime=time, location=location)
+    phase_altaz = SkyCoord(alt=90.0*u.deg, az=0.0*u.deg, obstime = obstime, frame = 'altaz', location = location)
+    phase_j2000 = phase_altaz.transform_to('fk5')
 
-    phase_altaz = SkyCoord(alt=90.0*u.deg, az=0.0*u.deg, obstime = time, frame = 'altaz', location = location)
-    phase_j2000 = phase_altaz.transform_to('icrs')
-    print("Phase Center: {}".format(phase_j2000))
     # Get the stokes enums for the polarization types
     corr_types = [[MS_STOKES_ENUMS[p_f] for p_f in pol_feeds]]
 
@@ -243,19 +275,20 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     ######################## SOURCE datasets ########################################
     for src in sources:
         name = src['name']
-        direction = [np.radians(src['el']), np.radians(src['az'])]
-
+        # Convert to J2000 
+        dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime,
+                             frame = 'altaz', location = location)
+        dir_j2000 = dir_altaz.transform_to('fk5')
+        direction = [dir_j2000.ra.radian, dir_j2000.dec.radian]
         #LOGGER.info("SOURCE: {}, timestamp: {}".format(name, timestamps))
         dask_num_lines = da.full((1,), 1, dtype=np.int32)
         dask_direction = da.asarray(direction)[None, :]
         dask_name = da.asarray(np.asarray([name], dtype=np.object))
-        dask_time = da.asarray(np.asarray([timestamps], dtype=np.object))
+        dask_time = da.asarray(np.array([epoch_s]))
         dataset = Dataset({
             "NUM_LINES": (("row",), dask_num_lines),
             "NAME": (("row",), dask_name),
-            #"TIME": (("row",), dask_time),
-            # FIXME. Causes an error. Need to sort out TIME data fields
-            # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/time-reference-frames
+            "TIME": (("row",), dask_time),
             "DIRECTION": (("row", "dir"), dask_direction),
             })
         src_table.append(dataset)
@@ -353,6 +386,8 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
         dask_ddid = da.full(row, ddid, chunks=chunks['row'], dtype=np.int32)
         dataset = Dataset({
             'DATA': (dims, dask_data),
+            'TIME': (("row", "corr"), da.from_array(epoch_s*np.ones((row, corr)))),
+            'TIME_CENTROID': (("row", "corr"), da.from_array(epoch_s*np.ones((row, corr)))),
             'WEIGHT': (("row", "corr"), da.from_array(0.95*np.ones((row, corr)))),
             'WEIGHT_SPECTRUM': (dims, da.from_array(0.95*np.ones_like(np_data, dtype=np.float64))),
             'SIGMA_SPECTRUM': (dims, da.from_array(np.ones_like(np_data, dtype=np.float64)*0.05)),

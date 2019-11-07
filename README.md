@@ -46,10 +46,11 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## TODO
 
-- Sort out the timestamps correctly
+- 
 
 ## Changelog
 
+- 0.1.3b1 Sort out the timestamps correctly, added a handy function for converting to epoch time.
 - 0.1.2 Correct pointing direction of the array (in J2000).
 - 0.1.1 Added -pol2 switch to generate a second polarization.
 - 0.1.0 first functioning release.
