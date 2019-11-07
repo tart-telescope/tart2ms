@@ -4,15 +4,15 @@ Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measureme
 
 ## Examples
 
-Download data from the TART in real time via the RESTful API (defaults to https://tart.elec.ac.nz/signal)
+Download data from the TART in real time via the RESTful API (defaults to using the API at https://tart.elec.ac.nz/signal):
 
     tart2ms --ms data.ms
 
-To convert a previously downloads JSON file to a measurement set (MS) 
+To convert a previously downloads JSON file to a measurement set (MS):
 
     tart2ms --json data.json --ms data.ms
 
-To view the image from the measurement set.
+To synthesize (using wsclean) the image from the measurement set:
 
     wsclean -name test -size 1280 1280 -scale 0.0275 -niter 0 data.ms
  
