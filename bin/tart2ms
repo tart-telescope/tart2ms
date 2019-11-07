@@ -79,7 +79,7 @@ if __name__ == "__main__":
     if ARGS.pol2:
         pol_feeds = [ 'RR', 'LL' ]
     else:
-        pol_feeds = [ 'XX' ]
+        pol_feeds = [ 'RR' ]
 
     print("Writing measurement set '{}'...".format(ARGS.ms))
     ms_create(ms_table_name=ARGS.ms, info = info['info'],
