@@ -1,0 +1,83 @@
+#!/usr/bin/env python
+#
+# Convert data from the TART telescope to measurement set format
+#
+import os
+import json
+
+import argparse
+import logging
+
+from tart_tools import api_handler
+from tart_tools import api_imaging
+from tart.operation import settings
+
+from tart2ms import MS_STOKES_ENUMS, ms_create
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
+                                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--json', required=False, default=None, help="Snapshot observation saved JSON file (visiblities, positions and more).")
+    parser.add_argument('--ms', required=False, default='tart.ms', help="Output MS table.")
+    parser.add_argument('--api', required=False, default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
+    parser.add_argument('--catalog', required=False, default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
+    parser.add_argument('--vis', required=False, default=None, help="Use a local JSON file containing the visibilities to create the image.")
+
+    ARGS = parser.parse_args()
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.ERROR)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+    
+    if os.path.isdir(ARGS.ms):
+        raise RuntimeError("Measurement set '{}' exists. Please delete before continuing".format(ARGS.ms))
+
+    if ARGS.json:
+        logger.info("Getting Data from file: {}".format(ARGS.json))
+        # Load data from a JSON file
+        with open(ARGS.json, 'r') as json_file:
+            json_data = json.load(json_file)
+            
+    else:
+        logger.info("Getting Data from API: {}".format(ARGS.api))
+        api = api_handler.APIhandler(ARGS.api)
+        info = api.get('info')
+        ant_pos = api.get('imaging/antenna_positions')
+        config = settings.from_api_json(info['info'], ant_pos)
+        gains_json = api.get('calibration/gain')
+        vis_json = api.get('imaging/vis')
+        ts = api_imaging.vis_json_timestamp(vis_json)
+
+        logger.info("Download Complete")
+       
+        src_json = api.get_url(api.catalog_url(config, datestr=ts.isoformat()))
+
+        json_data = {'info':info,
+                     'ant_pos':ant_pos,
+                     'gains': gains_json,
+                     'data': [[vis_json, src_json]]
+                    }
+    
+    info = json_data['info']
+    ant_pos = json_data['ant_pos']
+    config = settings.from_api_json(info['info'], ant_pos)
+    gains = json_data['gains']['gain']
+    phases = json_data['gains']['phase_offset']
+
+    for d in json_data['data']: # TODO deal with multiple observations in the JSON file later.
+        vis_json, source_json = d
+        cv, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
+        src_list = source_json
+
+    # FIXME. These appear to be weird polarization codes (or ID's). WHY oh WHY are they called corr?
+    # We use RR antennas, so this should be either RR or I?. I'm using FITS code 1 for this 'I'
+    corr_types = [ [MS_STOKES_ENUMS['I']] ]
+
+    ms_create(ms_table_name=ARGS.ms, info = info['info'],
+              ant_pos = ant_pos,
+              cal_vis = cv, timestamps=timestamp,
+              corr_types=corr_types, sources=src_list)
