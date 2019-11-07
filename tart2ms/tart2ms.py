@@ -80,8 +80,7 @@ MS_STOKES_ENUMS = {
     "PFlinear": 31,
     "Pangle": 32}
 
-# https://www.fiberoptics4sale.com/blogs/wave-optics/101446598-complex-number-representation-of-polarization-states
-# These are JONES vectors in a linarly polarized basis
+# These are Jones vectors in a linarly polarized basis [E_x, E_y]
 _zz = 1.0 / np.sqrt(2)
 POL_RESPONSES = {
     'XX': [1.0, 0.0],
@@ -158,7 +157,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
 
     ###################  Create a FEED dataset. ###################################
     # There is one feed per antenna, so this should be quite similar to the ANTENNA
-    num_pols = len(corr_types)
+    num_pols = len(pol_feeds)
     pol_types = []
     pol_responses = []
     for ct in pol_feeds:
@@ -241,16 +240,26 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
 
     # Create POLARISATION datasets.
     # Dataset per output row required because column shapes are variable
+        
     for corr_type in corr_types:
+        corr_prod = []
+        for i in range(len(corr_type)):
+            corr_prod.append([i,i])
+        corr_prod = np.array(corr_prod)
+        print("Corr Prod {}".format(corr_prod))
+        print("Corr Type {}".format(corr_type))
+        
         dask_num_corr = da.full((1,), len(corr_type), dtype=np.int32)
+        print("NUM_CORR {}".format(dask_num_corr))
         dask_corr_type = da.from_array(corr_type,
                                        chunks=len(corr_type))[None, :]
-        dask_corr_type = da.from_array(corr_type,
-                                       chunks=len(corr_type))[None, :]
+        dask_corr_product = da.asarray(corr_prod)[None, :]
+        print("Dask Corr Prod {}".format(dask_corr_product.shape))
+        print("Dask Corr Type {}".format(dask_corr_type.shape))
         dataset = Dataset({
             "NUM_CORR": (("row",), dask_num_corr),
-            #"CORR_PRODUCT": (("row",), dask_num_corr),
             "CORR_TYPE": (("row", "corr"), dask_corr_type),
+            "CORR_PRODUCT": (("row", "corr", "corrprod_idx"), dask_corr_product),
         })
 
         pol_datasets.append(dataset)

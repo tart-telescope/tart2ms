@@ -12,7 +12,7 @@ from tart_tools import api_handler
 from tart_tools import api_imaging
 from tart.operation import settings
 
-from tart2ms import MS_STOKES_ENUMS, ms_create
+from tart2ms import ms_create
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     if ARGS.pol2:
         pol_feeds = [ 'RR', 'LL' ]
     else:
-        pol_feeds = [ 'I' ]
+        pol_feeds = [ 'XX' ]
 
     print("Writing measurement set '{}'...".format(ARGS.ms))
     ms_create(ms_table_name=ARGS.ms, info = info['info'],
