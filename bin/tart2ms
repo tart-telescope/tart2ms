@@ -17,11 +17,11 @@ from tart2ms import MS_STOKES_ENUMS, ms_create
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--json', required=False, default=None, help="Snapshot observation saved JSON file (visiblities, positions and more).")
-    parser.add_argument('--ms', required=False, default='tart.ms', help="Output MS table.")
+    parser.add_argument('--json', required=False, default=None, help="Snapshot observation  JSON file (visiblities, positions and more).")
+    parser.add_argument('--ms', required=False, default='tart.ms', help="Output MS table name.")
     parser.add_argument('--api', required=False, default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
     parser.add_argument('--catalog', required=False, default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
-    parser.add_argument('--vis', required=False, default=None, help="Use a local JSON file containing the visibilities to create the image.")
+    parser.add_argument('--vis', required=False, default=None, help="Use a local JSON file containing the visibilities  for visibility data")
 
     ARGS = parser.parse_args()
 
@@ -37,13 +37,13 @@ if __name__ == "__main__":
         raise RuntimeError("Measurement set '{}' exists. Please delete before continuing".format(ARGS.ms))
 
     if ARGS.json:
-        logger.info("Getting Data from file: {}".format(ARGS.json))
+        print("Getting Data from file: {}".format(ARGS.json))
         # Load data from a JSON file
         with open(ARGS.json, 'r') as json_file:
             json_data = json.load(json_file)
             
     else:
-        logger.info("Getting Data from API: {}".format(ARGS.api))
+        print("Getting Data from API: {}".format(ARGS.api))
         api = api_handler.APIhandler(ARGS.api)
         info = api.get('info')
         ant_pos = api.get('imaging/antenna_positions')
@@ -52,7 +52,7 @@ if __name__ == "__main__":
         vis_json = api.get('imaging/vis')
         ts = api_imaging.vis_json_timestamp(vis_json)
 
-        logger.info("Download Complete")
+        print("Download Complete")
        
         src_json = api.get_url(api.catalog_url(config, datestr=ts.isoformat()))
 
@@ -77,7 +77,9 @@ if __name__ == "__main__":
     # We use RR antennas, so this should be either RR or I?. I'm using FITS code 1 for this 'I'
     corr_types = [ [MS_STOKES_ENUMS['I']] ]
 
+    print("Writing measurement set '{}'...".format(ARGS.ms))
     ms_create(ms_table_name=ARGS.ms, info = info['info'],
               ant_pos = ant_pos,
               cal_vis = cv, timestamps=timestamp,
               corr_types=corr_types, sources=src_list)
+    print("Measurement set writing complete.")

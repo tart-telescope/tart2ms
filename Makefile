@@ -10,9 +10,11 @@ lint:
 	pylint --extension-pkg-whitelist=numpy --ignored-modules=numpy,tart_tools --extension-pkg-whitelist=astropy tart2ms
 
 test_upload:
+	rm -rf tart2ms.egg-info dist
 	python3 setup.py sdist
 	twine upload --repository testpypi dist/*
 
 upload:
+	rm -rf tart2ms.egg-info dist
 	python3 setup.py sdist
 	twine upload --repository pypi dist/*

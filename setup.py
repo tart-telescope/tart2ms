@@ -1,10 +1,17 @@
+'''
+    A convert TART JSON data into a measurement set.
+    Author: Tim Molteno, tim@elec.ac.nz
+    Copyright (c) 2019.
+
+    License. GPLv3.
+'''
 from setuptools import setup, find_packages
 
 with open('README.md') as f:
     readme = f.read()
 
 setup(name='tart2ms',
-    version='0.1.0b2',
+    version='0.1.0b4',
     description='Convert TART observation data to Measurement Sets',
     long_description=readme,
     long_description_content_type="text/markdown",

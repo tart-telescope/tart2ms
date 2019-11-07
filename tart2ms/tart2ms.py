@@ -201,7 +201,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         ## FIXME these are in elevation and azimuth. Not in J2000.
 
         #LOGGER.info("SOURCE: {}, timestamp: {}".format(name, timestamps))
-        dask_num_lines = da.full((1,), len(rest_freq), dtype=np.int32)
+        dask_num_lines = da.full((1,), 1, dtype=np.int32)
         dask_direction = da.asarray(direction)[None, :]
         dask_name = da.asarray(np.asarray([name], dtype=np.object))
         dask_time = da.asarray(np.asarray([timestamps], dtype=np.object))
