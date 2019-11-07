@@ -46,3 +46,8 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 - Add the correct pointing direction of the array (in J2000).
 - Sort out the correct polarization settings for LHCP.
+
+## Changelog
+
+-0.1.1 Added switch to generate a second polarization.
+- 0.1.0 first functioning release.
