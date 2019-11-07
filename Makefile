@@ -7,7 +7,7 @@ develop:
 	sudo python3 setup.py develop
 
 lint:
-	pylint --extension-pkg-whitelist=numpy --ignored-modules=numpy,tart_tools --extension-pkg-whitelist=astropy tart2ms
+	pylint --extension-pkg-whitelist=numpy --ignored-modules=numpy,tart_tools,dask,dask.array --extension-pkg-whitelist=astropy --extension-pkg-whitelist=dask tart2ms
 
 test_upload:
 	rm -rf tart2ms.egg-info dist
