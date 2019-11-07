@@ -21,8 +21,7 @@ from daskms import Dataset, xds_to_table
 from tart.operation import settings
 from tart.util import constants
 
-
-logger = logging.getLogger()
+LOGGER = logging.getLogger()
 
 '''
 The following from Oleg Smirnov.
@@ -158,25 +157,25 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         'ANTENNA_ID': (("row",), antenna_ids),
         'FEED_ID': (("row",), feed_ids),
         'NUM_RECEPTORS': (("row",), num_receptors),
-        'POLARIZATION_TYPE': (("row", "receptors",), 
-            da.from_array(polarization_types, chunks=na)),
-        'RECEPTOR_ANGLE': (("row", "receptors",), 
-            da.from_array(receptor_angles, chunks=na)),
-        'POL_RESPONSE': (("row", "receptors", "receptors-2"), 
-            da.from_array(pol_response, chunks=na)),
-        'BEAM_OFFSET': (("row", "receptors", "radec"), 
-            da.from_array(beam_offset, chunks=na)),
+        'POLARIZATION_TYPE': (("row", "receptors",),
+                              da.from_array(polarization_types, chunks=na)),
+        'RECEPTOR_ANGLE': (("row", "receptors",),
+                           da.from_array(receptor_angles, chunks=na)),
+        'POL_RESPONSE': (("row", "receptors", "receptors-2"),
+                         da.from_array(pol_response, chunks=na)),
+        'BEAM_OFFSET': (("row", "receptors", "radec"),
+                        da.from_array(beam_offset, chunks=na)),
     })
     feed_datasets.append(dataset)
 
 
     ####################### FIELD dataset #########################################
-    direction = [ [np.radians(90.0), np.radians(0.0)]]   ## Phase Center in J2000
+    direction = [[np.radians(90.0), np.radians(0.0)]]   ## Phase Center in J2000
     field_direction = da.asarray(direction)[None, :]
     field_name = da.asarray(np.asarray(['up'], dtype=np.object))
     field_num_poly = da.zeros(1) # Zero order polynomial in time for phase center.
 
-    dir_dims = ("row",'field-poly', 'field-dir',)
+    dir_dims = ("row", 'field-poly', 'field-dir',)
 
     dataset = Dataset({
         'PHASE_DIR': (dir_dims, field_direction),
@@ -198,20 +197,18 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
     ######################## SOURCE datasets ########################################
     for src in sources:
         name = src['name']
-        rest_freq = [info['operating_frequency']]
-        direction = [np.radians(src['el']), np.radians(src['az'])]   
+        direction = [np.radians(src['el']), np.radians(src['az'])]
         ## FIXME these are in elevation and azimuth. Not in J2000.
-        
-        #logger.info("SOURCE: {}, timestamp: {}".format(name, timestamps))
+
+        #LOGGER.info("SOURCE: {}, timestamp: {}".format(name, timestamps))
         dask_num_lines = da.full((1,), len(rest_freq), dtype=np.int32)
         dask_direction = da.asarray(direction)[None, :]
-        dask_rest_freq = da.asarray(rest_freq)[None, :]
         dask_name = da.asarray(np.asarray([name], dtype=np.object))
         dask_time = da.asarray(np.asarray([timestamps], dtype=np.object))
         dataset = Dataset({
             "NUM_LINES": (("row",), dask_num_lines),
             "NAME": (("row",), dask_name),
-            #"TIME": (("row",), dask_time), 
+            #"TIME": (("row",), dask_time),
             # FIXME. Causes an error. Need to sort out TIME data fields
             "DIRECTION": (("row", "dir"), dask_direction),
             })
@@ -235,7 +232,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
 
     # Create multiple SPECTRAL_WINDOW datasets
     # Dataset per output row required because column shapes are variable
-    
+
     for num_chan in num_chans:
         dask_num_chan = da.full((1,), num_chan, dtype=np.int32)
         dask_chan_freq = da.asarray([[info['operating_frequency']]])
@@ -262,7 +259,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
     }))
 
     # Now create the associated MS dataset
-    
+
     vis_data, baselines = cal_vis.get_all_visibility()
     vis_array = np.array(vis_data, dtype=np.complex64)
     chunks = {
@@ -270,21 +267,21 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
     }
     baselines = np.array(baselines)
     bl_pos = np.array(ant_pos)[baselines]
-    uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T/constants.L1_WAVELENGTH  
+    uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T/constants.L1_WAVELENGTH
     # Use the - sign to get the same orientation as our tart projections.
 
     uvw_array = np.array([uu_a, vv_a, ww_a]).T
 
     for ddid, (spw_id, pol_id) in enumerate(zip(spw_ids, pol_ids)):
         # Infer row, chan and correlation shape
-        logger.info("ddid:{} ({}, {})".format(ddid, spw_id, pol_id))
+        #LOGGER.info("ddid:{} ({}, {})".format(ddid, spw_id, pol_id))
         row = sum(chunks['row'])
         chan = spw_datasets[spw_id].CHAN_FREQ.shape[1]
         corr = pol_datasets[pol_id].CORR_TYPE.shape[1]
 
         # Create some dask vis data
         dims = ("row", "chan", "corr")
-        logger.info("Data size {}".format((row, chan, corr)))
+        LOGGER.info("Data size %s %s %s" % (row, chan, corr))
 
         np_data = vis_array.reshape((row, chan, corr))
         np_uvw = uvw_array.reshape((row, 3))
@@ -328,5 +325,3 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
     dask.compute(spw_writes)
     dask.compute(ddid_writes)
     dask.compute(source_writes)
-
-

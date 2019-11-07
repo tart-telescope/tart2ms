@@ -1,8 +1,6 @@
 # tart2ms
 
-Convert TART data to measurement set format. This module relies on the excellent dask-ms module as a helper to create the 
-measurement sets. 
-
+Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measurement set format. This module relies on the excellent dask-ms module as a helper to create the measurement sets. 
 
 ## Usage
 
