@@ -18,6 +18,10 @@ import numpy as np
 
 from daskms import Dataset, xds_to_table
 
+import astropy.units as u
+from astropy.time import Time
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+
 from tart.util import constants
 
 LOGGER = logging.getLogger()
@@ -123,11 +127,21 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
         }
     },
     '''
-    ctypes = []
-    for p_f in pol_feeds:
-        ctypes.append(MS_STOKES_ENUMS[p_f])
+    loc = info['location']
+    location = EarthLocation.from_geodetic(lon=loc['lon']*u.deg,
+                                           lat=loc['lat']*u.deg,
+                                           height=loc['alt']*u.m,
+                                           ellipsoid='WGS84')
 
-    corr_types = [ctypes]
+    time = Time(timestamps)
+    local_frame = AltAz(obstime=time, location=location)
+
+    phase_altaz = SkyCoord(alt=90.0*u.deg, az=0.0*u.deg, obstime = time, frame = 'altaz', location = location)
+    phase_j2000 = phase_altaz.transform_to('icrs')
+    print("Phase Center: {}".format(phase_j2000))
+    # Get the stokes enums for the polarization types
+    corr_types = [[MS_STOKES_ENUMS[p_f] for p_f in pol_feeds]]
+
     LOGGER.info("Pol Feeds {}".format(pol_feeds))
     LOGGER.info("Correlation Types {}".format(corr_types))
     num_freq_channels = [1]
@@ -169,11 +183,8 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     ###################  Create a FEED dataset. ###################################
     # There is one feed per antenna, so this should be quite similar to the ANTENNA
     num_pols = len(pol_feeds)
-    pol_types = []
-    pol_responses = []
-    for ct in pol_feeds:
-        pol_types.append(ct)
-        pol_responses.append(POL_RESPONSES[ct])
+    pol_types = pol_feeds
+    pol_responses = [POL_RESPONSES[ct] for ct in pol_feeds]
 
     LOGGER.info("Pol Types {}".format(pol_types))
     LOGGER.info("Pol Responses {}".format(pol_responses))
@@ -204,7 +215,8 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
 
 
     ####################### FIELD dataset #########################################
-    direction = [[np.radians(90.0), np.radians(0.0)]]   ## Phase Center in J2000
+    
+    direction = [[phase_j2000.ra.radian, phase_j2000.dec.radian]] 
     field_direction = da.asarray(direction)[None, :]
     field_name = da.asarray(np.asarray(['up'], dtype=np.object))
     field_num_poly = da.zeros(1) # Zero order polynomial in time for phase center.
@@ -232,7 +244,6 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     for src in sources:
         name = src['name']
         direction = [np.radians(src['el']), np.radians(src['az'])]
-        ## FIXME these are in elevation and azimuth. Not in J2000.
 
         #LOGGER.info("SOURCE: {}, timestamp: {}".format(name, timestamps))
         dask_num_lines = da.full((1,), 1, dtype=np.int32)
@@ -244,6 +255,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
             "NAME": (("row",), dask_name),
             #"TIME": (("row",), dask_time),
             # FIXME. Causes an error. Need to sort out TIME data fields
+            # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/time-reference-frames
             "DIRECTION": (("row", "dir"), dask_direction),
             })
         src_table.append(dataset)
@@ -252,9 +264,8 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     # Dataset per output row required because column shapes are variable
 
     for corr_type in corr_types:
-        corr_prod = []
-        for i in range(len(corr_type)):
-            corr_prod.append([i, i])  # Add the correlations from pol -> pol
+        corr_prod = [[i, i] for i in range(len(corr_type))]
+
         corr_prod = np.array(corr_prod)
         LOGGER.info("Corr Prod {}".format(corr_prod))
         LOGGER.info("Corr Type {}".format(corr_type))
