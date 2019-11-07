@@ -18,7 +18,6 @@ import numpy as np
 
 from daskms import Dataset, xds_to_table
 
-from tart.operation import settings
 from tart.util import constants
 
 LOGGER = logging.getLogger()
@@ -80,9 +79,33 @@ MS_STOKES_ENUMS = {
     "PFlinear": 31,
     "Pangle": 32}
 
+# These are Jones vectors in a linarly polarized basis [E_x, E_y]
+_ZZ = 1.0 / np.sqrt(2)
+POL_RESPONSES = {
+    'XX': [1.0, 0.0],
+    'YY': [0.0, 1.0],
+    'RR': [_ZZ, -_ZZ*1.0j],
+    'LL': [_ZZ, +_ZZ*1.0j]
+    }
 
 
-def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sources):
+class MSTable:
+    '''
+        Little Helper to simplify writing a table.
+    '''
+    def __init__(self, ms_name, table_name):
+        self.table_name = "::".join((ms_name, table_name))
+        self.datasets = []
+
+    def append(self, dataset):
+        self.datasets.append(dataset)
+
+    def write(self):
+        writes = xds_to_table(self.datasets, self.table_name, columns="ALL")
+        dask.compute(writes)
+
+
+def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sources):
     '''    "info": {
         "info": {
             "L0_frequency": 1571328000.0,
@@ -100,73 +123,84 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         }
     },
     '''
+    ctypes = []
+    for p_f in pol_feeds:
+        ctypes.append(MS_STOKES_ENUMS[p_f])
 
-    num_chans = [1]
+    corr_types = [ctypes]
+    LOGGER.info("Pol Feeds {}".format(pol_feeds))
+    LOGGER.info("Correlation Types {}".format(corr_types))
+    num_freq_channels = [1]
 
-    ant_table_name = "::".join((ms_table_name, "ANTENNA"))
-    feed_table_name = "::".join((ms_table_name, "FEED"))
-    field_table_name = "::".join((ms_table_name, "FIELD"))
-    obs_table_name = "::".join((ms_table_name, "OBSERVATION"))
-    ddid_table_name = "::".join((ms_table_name, "DATA_DESCRIPTION"))
-    pol_table_name = "::".join((ms_table_name, "POLARIZATION"))
-    spw_table_name = "::".join((ms_table_name, "SPECTRAL_WINDOW"))
+    ant_table = MSTable(ms_table_name, 'ANTENNA')
+    feed_table = MSTable(ms_table_name, 'FEED')
+    field_table = MSTable(ms_table_name, 'FIELD')
+    pol_table = MSTable(ms_table_name, 'POLARIZATION')
+    obs_table = MSTable(ms_table_name, 'OBSERVATION')
     # SOURCE is an optional MS sub-table
-    src_table_name = "::".join((ms_table_name, "SOURCE"))
+    src_table = MSTable(ms_table_name, 'SOURCE')
+    
+    ddid_table_name = "::".join((ms_table_name, "DATA_DESCRIPTION"))
+    spw_table_name = "::".join((ms_table_name, "SPECTRAL_WINDOW"))
 
     ms_datasets = []
-    ant_datasets = []
-    feed_datasets = []
-    field_datasets = []
-    obs_datasets = []
     ddid_datasets = []
-    pol_datasets = []
     spw_datasets = []
-    src_datasets = []
 
     # Create ANTENNA dataset
     # Each column in the ANTENNA has a fixed shape so we
     # can represent all rows with one dataset
-    na = len(ant_pos)
+    num_ant = len(ant_pos)
     position = da.asarray(ant_pos)
-    diameter = da.ones(na) * 0.025
-    offset = da.zeros((na, 3))
-    names = np.array(['ANTENNA-%d' % i for i in range(na)], dtype=np.object)
-    stations = np.array([info['name'] for i in range(na)], dtype=np.object)
+    diameter = da.ones(num_ant) * 0.025
+    offset = da.zeros((num_ant, 3))
+    names = np.array(['ANTENNA-%d' % i for i in range(num_ant)], dtype=np.object)
+    stations = np.array([info['name'] for i in range(num_ant)], dtype=np.object)
 
     dataset = Dataset({
         'POSITION': (("row", "xyz"), position),
         'OFFSET': (("row", "xyz"), offset),
         'DISH_DIAMETER': (("row",), diameter),
-        'NAME': (("row",), da.from_array(names, chunks=na)),
-        'STATION': (("row",), da.from_array(stations, chunks=na)),
+        'NAME': (("row",), da.from_array(names, chunks=num_ant)),
+        'STATION': (("row",), da.from_array(stations, chunks=num_ant)),
     })
-    ant_datasets.append(dataset)
+    ant_table.append(dataset)
 
     ###################  Create a FEED dataset. ###################################
     # There is one feed per antenna, so this should be quite similar to the ANTENNA
-    antenna_ids = da.asarray(range(na))
-    feed_ids = da.zeros(na)
-    num_receptors = da.ones(na)
-    polarization_types = np.array([['XX'] for i in range(na)], dtype=np.object)
-    receptor_angles = np.array([[0.0] for i in range(na)])
-    pol_response = np.array([[[0.0 + 1.0j, 1.0 - 1.0j]] for i in range(na)])
+    num_pols = len(pol_feeds)
+    pol_types = []
+    pol_responses = []
+    for ct in pol_feeds:
+        pol_types.append(ct)
+        pol_responses.append(POL_RESPONSES[ct])
 
-    beam_offset = np.array([[[0.0, 0.0]] for i in range(na)])
+    LOGGER.info("Pol Types {}".format(pol_types))
+    LOGGER.info("Pol Responses {}".format(pol_responses))
+
+    antenna_ids = da.asarray(range(num_ant))
+    feed_ids = da.zeros(num_ant)
+    num_receptors = da.zeros(num_ant) + num_pols
+    polarization_types = np.array([pol_types for i in range(num_ant)], dtype=np.object)
+    receptor_angles = np.array([[0.0] for i in range(num_ant)])
+    pol_response = np.array([pol_responses for i in range(num_ant)])
+
+    beam_offset = np.array([[[0.0, 0.0]] for i in range(num_ant)])
 
     dataset = Dataset({
         'ANTENNA_ID': (("row",), antenna_ids),
         'FEED_ID': (("row",), feed_ids),
         'NUM_RECEPTORS': (("row",), num_receptors),
         'POLARIZATION_TYPE': (("row", "receptors",),
-                              da.from_array(polarization_types, chunks=na)),
+                              da.asarray(polarization_types)),
         'RECEPTOR_ANGLE': (("row", "receptors",),
-                           da.from_array(receptor_angles, chunks=na)),
+                           da.from_array(receptor_angles, chunks=num_ant)),
         'POL_RESPONSE': (("row", "receptors", "receptors-2"),
-                         da.from_array(pol_response, chunks=na)),
+                         da.from_array(pol_response, chunks=num_ant)),
         'BEAM_OFFSET': (("row", "receptors", "radec"),
-                        da.from_array(beam_offset, chunks=na)),
+                        da.from_array(beam_offset, chunks=num_ant)),
     })
-    feed_datasets.append(dataset)
+    feed_table.append(dataset)
 
 
     ####################### FIELD dataset #########################################
@@ -184,7 +218,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         'NUM_POLY': (("row", ), field_num_poly),
         'NAME': (("row", ), field_name),
     })
-    field_datasets.append(dataset)
+    field_table.append(dataset)
 
    ######################### OBSERVATION dataset #####################################
 
@@ -192,7 +226,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         'TELESCOPE_NAME': (("row",), da.asarray(np.asarray(['TART'], dtype=np.object))),
         'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=np.object))),
     })
-    obs_datasets.append(dataset)
+    obs_table.append(dataset)
 
     ######################## SOURCE datasets ########################################
     for src in sources:
@@ -212,28 +246,38 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
             # FIXME. Causes an error. Need to sort out TIME data fields
             "DIRECTION": (("row", "dir"), dask_direction),
             })
-        src_datasets.append(dataset)
+        src_table.append(dataset)
 
     # Create POLARISATION datasets.
     # Dataset per output row required because column shapes are variable
+
     for corr_type in corr_types:
+        corr_prod = []
+        for i in range(len(corr_type)):
+            corr_prod.append([i, i])  # Add the correlations from pol -> pol
+        corr_prod = np.array(corr_prod)
+        LOGGER.info("Corr Prod {}".format(corr_prod))
+        LOGGER.info("Corr Type {}".format(corr_type))
+
         dask_num_corr = da.full((1,), len(corr_type), dtype=np.int32)
+        LOGGER.info("NUM_CORR {}".format(dask_num_corr))
         dask_corr_type = da.from_array(corr_type,
                                        chunks=len(corr_type))[None, :]
-        dask_corr_type = da.from_array(corr_type,
-                                       chunks=len(corr_type))[None, :]
+        dask_corr_product = da.asarray(corr_prod)[None, :]
+        LOGGER.info("Dask Corr Prod {}".format(dask_corr_product.shape))
+        LOGGER.info("Dask Corr Type {}".format(dask_corr_type.shape))
         dataset = Dataset({
             "NUM_CORR": (("row",), dask_num_corr),
-            #"CORR_PRODUCT": (("row",), dask_num_corr),
             "CORR_TYPE": (("row", "corr"), dask_corr_type),
+            "CORR_PRODUCT": (("row", "corr", "corrprod_idx"), dask_corr_product),
         })
 
-        pol_datasets.append(dataset)
+        pol_table.append(dataset)
 
     # Create multiple SPECTRAL_WINDOW datasets
     # Dataset per output row required because column shapes are variable
 
-    for num_chan in num_chans:
+    for num_chan in num_freq_channels:
         dask_num_chan = da.full((1,), num_chan, dtype=np.int32)
         dask_chan_freq = da.asarray([[info['operating_frequency']]])
         dask_chan_width = da.full((1, num_chan), 2.5e6/num_chan)
@@ -249,7 +293,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
     # For each cartesian product of SPECTRAL_WINDOW and POLARIZATION
     # create a corresponding DATA_DESCRIPTION.
     # Each column has fixed shape so we handle all rows at once
-    spw_ids, pol_ids = zip(*product(range(len(num_chans)),
+    spw_ids, pol_ids = zip(*product(range(len(num_freq_channels)),
                                     range(len(corr_types))))
     dask_spw_ids = da.asarray(np.asarray(spw_ids, dtype=np.int32))
     dask_pol_ids = da.asarray(np.asarray(pol_ids, dtype=np.int32))
@@ -277,13 +321,17 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         #LOGGER.info("ddid:{} ({}, {})".format(ddid, spw_id, pol_id))
         row = sum(chunks['row'])
         chan = spw_datasets[spw_id].CHAN_FREQ.shape[1]
-        corr = pol_datasets[pol_id].CORR_TYPE.shape[1]
+        corr = pol_table.datasets[pol_id].CORR_TYPE.shape[1]
 
         # Create some dask vis data
         dims = ("row", "chan", "corr")
         LOGGER.info("Data size %s %s %s" % (row, chan, corr))
 
-        np_data = vis_array.reshape((row, chan, corr))
+        #np_data = vis_array.reshape((row, chan, corr))
+        np_data = np.zeros((row, chan, corr), dtype=np.complex128)
+        for i in range(corr):
+            np_data[:, :, i] = vis_array.reshape((row, chan))
+        #np_data = np.array([vis_array.reshape((row, chan, 1)) for i in range(corr)])
         np_uvw = uvw_array.reshape((row, 3))
 
         data_chunks = tuple((chunks['row'], chan, corr))
@@ -307,21 +355,17 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         ms_datasets.append(dataset)
 
     ms_writes = xds_to_table(ms_datasets, ms_table_name, columns="ALL")
-    ant_writes = xds_to_table(ant_datasets, ant_table_name, columns="ALL")
-    feed_writes = xds_to_table(feed_datasets, feed_table_name, columns="ALL")
-    field_writes = xds_to_table(field_datasets, field_table_name, columns="ALL")
-    obs_writes = xds_to_table(obs_datasets, obs_table_name, columns="ALL")
-    pol_writes = xds_to_table(pol_datasets, pol_table_name, columns="ALL")
     spw_writes = xds_to_table(spw_datasets, spw_table_name, columns="ALL")
     ddid_writes = xds_to_table(ddid_datasets, ddid_table_name, columns="ALL")
-    source_writes = xds_to_table(src_datasets, src_table_name, columns="ALL")
 
     dask.compute(ms_writes)
-    dask.compute(ant_writes)
-    dask.compute(feed_writes)
-    dask.compute(field_writes)
-    dask.compute(obs_writes)
-    dask.compute(pol_writes)
+
+    ant_table.write()
+    feed_table.write()
+    field_table.write()
+    pol_table.write()
+    obs_table.write()
+    src_table.write()
+
     dask.compute(spw_writes)
     dask.compute(ddid_writes)
-    dask.compute(source_writes)
