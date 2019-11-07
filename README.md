@@ -21,7 +21,7 @@ This will create an image called test-image.fits
 ## Usage
 
     usage: tart2ms [-h] [--json JSON] [--ms MS] [--api API] [--catalog CATALOG]
-                [--vis VIS]
+                [--vis VIS] [--pol2]
 
     Generate measurement set from a JSON file from the TART radio telescope.
 
@@ -36,6 +36,8 @@ This will create an image called test-image.fits
                         https://tart.elec.ac.nz/catalog)
     --vis VIS          Use a local JSON file containing the visibilities for
                         visibility data (default: None)
+    --pol2             Fake a second polarization. Some pipelines choke if there
+                        is only one. (default: False)
 
 ## Credits
 
@@ -49,5 +51,5 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
--0.1.1 Added switch to generate a second polarization.
+- 0.1.1 Added -pol2 switch to generate a second polarization.
 - 0.1.0 first functioning release.
