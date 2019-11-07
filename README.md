@@ -2,6 +2,22 @@
 
 Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measurement set format. This module relies on the excellent dask-ms module as a helper to create the measurement sets. 
 
+## Examples
+
+Download data from the TART in real time via the RESTful API (defaults to https://tart.elec.ac.nz/signal)
+
+    tart2ms --ms data.ms
+
+To convert a previously downloads JSON file to a measurement set (MS) 
+
+    tart2ms --json data.json --ms data.ms
+
+To view the image from the measurement set.
+
+    wsclean -name test -size 1280 1280 -scale 0.0275 -niter 0 data.ms
+ 
+This will create an image called test-image.fits
+
 ## Usage
 
     usage: tart2ms [-h] [--json JSON] [--ms MS] [--api API] [--catalog CATALOG]
@@ -24,3 +40,9 @@ Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measureme
 ## Credits
 
 Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measurement set documentation.
+
+
+## TODO
+
+- Add the correct pointing direction of the array (in J2000).
+- Sort out the correct polarization settings for LHCP.
