@@ -80,9 +80,17 @@ MS_STOKES_ENUMS = {
     "PFlinear": 31,
     "Pangle": 32}
 
+# https://www.fiberoptics4sale.com/blogs/wave-optics/101446598-complex-number-representation-of-polarization-states
+# These are JONES vectors in a linarly polarized basis
+_zz = 1.0 / np.sqrt(2)
+POL_RESPONSES = {
+    'XX': [1.0, 0.0],
+    'YY': [0.0, 1.0],
+    'RR': [_zz, -_zz*1.0j],
+    'LL': [_zz, +_zz*1.0j]
+    }
 
-
-def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sources):
+def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sources):
     '''    "info": {
         "info": {
             "L0_frequency": 1571328000.0,
@@ -100,8 +108,14 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         }
     },
     '''
-
-    num_chans = [1]
+    ctypes = []
+    for p in pol_feeds:
+        ctypes.append(MS_STOKES_ENUMS[p])
+        
+    corr_types = [ctypes]
+    print("Pol Feeds {}".format(pol_feeds))
+    print("Correlation Types {}".format(corr_types))
+    num_freq_channels = [1]
 
     ant_table_name = "::".join((ms_table_name, "ANTENNA"))
     feed_table_name = "::".join((ms_table_name, "FEED"))
@@ -144,12 +158,23 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
 
     ###################  Create a FEED dataset. ###################################
     # There is one feed per antenna, so this should be quite similar to the ANTENNA
+    num_pols = len(corr_types)
+    pol_types = []
+    pol_responses = []
+    for ct in pol_feeds:
+        pol_types.append(ct)
+        pol_responses.append(POL_RESPONSES[ct])
+        
+    print("Pol Types {}".format(pol_types))
+    print("Pol Responses {}".format(pol_responses))
+    
+    
     antenna_ids = da.asarray(range(na))
     feed_ids = da.zeros(na)
-    num_receptors = da.ones(na)
-    polarization_types = np.array([['XX'] for i in range(na)], dtype=np.object)
+    num_receptors = da.zeros(na) + num_pols
+    polarization_types = np.array([pol_types for i in range(na)], dtype=np.object)
     receptor_angles = np.array([[0.0] for i in range(na)])
-    pol_response = np.array([[[0.0 + 1.0j, 1.0 - 1.0j]] for i in range(na)])
+    pol_response = np.array([pol_responses for i in range(na)])
 
     beam_offset = np.array([[[0.0, 0.0]] for i in range(na)])
 
@@ -158,11 +183,11 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         'FEED_ID': (("row",), feed_ids),
         'NUM_RECEPTORS': (("row",), num_receptors),
         'POLARIZATION_TYPE': (("row", "receptors",),
-                              da.from_array(polarization_types, chunks=na)),
+                            da.from_array(polarization_types, chunks=na)),
         'RECEPTOR_ANGLE': (("row", "receptors",),
-                           da.from_array(receptor_angles, chunks=na)),
+                        da.from_array(receptor_angles, chunks=na)),
         'POL_RESPONSE': (("row", "receptors", "receptors-2"),
-                         da.from_array(pol_response, chunks=na)),
+                        da.from_array(pol_response, chunks=na)),
         'BEAM_OFFSET': (("row", "receptors", "radec"),
                         da.from_array(beam_offset, chunks=na)),
     })
@@ -233,7 +258,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
     # Create multiple SPECTRAL_WINDOW datasets
     # Dataset per output row required because column shapes are variable
 
-    for num_chan in num_chans:
+    for num_chan in num_freq_channels:
         dask_num_chan = da.full((1,), num_chan, dtype=np.int32)
         dask_chan_freq = da.asarray([[info['operating_frequency']]])
         dask_chan_width = da.full((1, num_chan), 2.5e6/num_chan)
@@ -249,7 +274,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
     # For each cartesian product of SPECTRAL_WINDOW and POLARIZATION
     # create a corresponding DATA_DESCRIPTION.
     # Each column has fixed shape so we handle all rows at once
-    spw_ids, pol_ids = zip(*product(range(len(num_chans)),
+    spw_ids, pol_ids = zip(*product(range(len(num_freq_channels)),
                                     range(len(corr_types))))
     dask_spw_ids = da.asarray(np.asarray(spw_ids, dtype=np.int32))
     dask_pol_ids = da.asarray(np.asarray(pol_ids, dtype=np.int32))
@@ -283,7 +308,11 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, corr_types, sou
         dims = ("row", "chan", "corr")
         LOGGER.info("Data size %s %s %s" % (row, chan, corr))
 
-        np_data = vis_array.reshape((row, chan, corr))
+        #np_data = vis_array.reshape((row, chan, corr))
+        np_data = np.zeros((row, chan, corr), dtype=np.complex128)
+        for i in range(corr):
+            np_data[:,:,i] = vis_array.reshape((row, chan))
+        #np_data = np.array([vis_array.reshape((row, chan, 1)) for i in range(corr)])
         np_uvw = uvw_array.reshape((row, 3))
 
         data_chunks = tuple((chunks['row'], chan, corr))

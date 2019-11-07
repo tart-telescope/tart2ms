@@ -22,6 +22,7 @@ if __name__ == "__main__":
     parser.add_argument('--api', required=False, default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
     parser.add_argument('--catalog', required=False, default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
     parser.add_argument('--vis', required=False, default=None, help="Use a local JSON file containing the visibilities  for visibility data")
+    parser.add_argument('--pol2', action="store_true", help="Fake a second polarization. Some pipelines choke if there is only one.")
 
     ARGS = parser.parse_args()
 
@@ -75,11 +76,14 @@ if __name__ == "__main__":
 
     # FIXME. These appear to be weird polarization codes (or ID's). WHY oh WHY are they called corr?
     # We use RR antennas, so this should be either RR or I?. I'm using FITS code 1 for this 'I'
-    corr_types = [ [MS_STOKES_ENUMS['I']] ]
+    if ARGS.pol2:
+        pol_feeds = [ 'RR', 'LL' ]
+    else:
+        pol_feeds = [ 'I' ]
 
     print("Writing measurement set '{}'...".format(ARGS.ms))
     ms_create(ms_table_name=ARGS.ms, info = info['info'],
               ant_pos = ant_pos,
               cal_vis = cv, timestamps=timestamp,
-              corr_types=corr_types, sources=src_list)
+              pol_feeds=pol_feeds, sources=src_list)
     print("Measurement set writing complete.")
