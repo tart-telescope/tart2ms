@@ -118,8 +118,7 @@ def timestamp_to_ms_epoch(ts):
         
     Parameters
     ----------
-    ts : function or method
-       A timestamp object.
+    ts : A timestamp object.
 
     Returns
     -------
@@ -127,29 +126,40 @@ def timestamp_to_ms_epoch(ts):
       The epoch time ``t`` in seconds suitable for fields in 
       measurement sets.
     '''
-    dm = measures()    
-    epoch_d = dm.epoch(rf='utc', v0=ts.isoformat())['m0']['value']
+    dm = measures()
+    epoch = dm.epoch(rf='utc', v0=ts.isoformat())
+    epoch_d = epoch['m0']['value']
     epoch_s = epoch_d*24*60*60.0
     return epoch_s
 
 
 def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sources):
-    '''    "info": {
+    ''' Create a Measurement Set from some TART observations
+    
+    Parameters
+    ----------
+    info : JSON
         "info": {
-            "L0_frequency": 1571328000.0,
-            "bandwidth": 2500000.0,
-            "baseband_frequency": 4092000.0,
-            "location": {
-                "alt": 270.0,
-                "lat": -45.85177,
-                "lon": 170.5456
-            },
-            "name": "Signal Hill - Dunedin",
-            "num_antenna": 24,
-            "operating_frequency": 1575420000.0,
-            "sampling_frequency": 16368000.0
-        }
-    },
+            "info": {
+                "L0_frequency": 1571328000.0,
+                "bandwidth": 2500000.0,
+                "baseband_frequency": 4092000.0,
+                "location": {
+                    "alt": 270.0,
+                    "lat": -45.85177,
+                    "lon": 170.5456
+                },
+                "name": "Signal Hill - Dunedin",
+                "num_antenna": 24,
+                "operating_frequency": 1575420000.0,
+                "sampling_frequency": 16368000.0
+            }
+        },
+
+    Returns
+    -------
+    None
+      
     '''
 
     epoch_s = timestamp_to_ms_epoch(timestamps)
