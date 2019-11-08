@@ -269,6 +269,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     dataset = Dataset({
         'TELESCOPE_NAME': (("row",), da.asarray(np.asarray(['TART'], dtype=np.object))),
         'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=np.object))),
+        "TIME_RANGE": (("row","obs-exts"), da.asarray(np.array([[epoch_s, epoch_s+1]]))),
     })
     obs_table.append(dataset)
 
