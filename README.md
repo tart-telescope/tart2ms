@@ -1,5 +1,7 @@
 # tart2ms
 
+[![Build Status](https://travis-ci.org/tmolteno/tart2ms.svg?branch=master)](https://travis-ci.org/tmolteno/tart2ms)
+
 Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measurement set format. This module relies on the excellent dask-ms module as a helper to create the measurement sets. 
 
 ## Install
