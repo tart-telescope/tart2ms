@@ -12,7 +12,7 @@ from tart_tools import api_handler
 from tart_tools import api_imaging
 from tart.operation import settings
 
-from tart2ms import ms_create
+from tart2ms import ms_from_json
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
@@ -63,27 +63,6 @@ if __name__ == "__main__":
                      'data': [[vis_json, src_json]]
                     }
     
-    info = json_data['info']
-    ant_pos = json_data['ant_pos']
-    config = settings.from_api_json(info['info'], ant_pos)
-    gains = json_data['gains']['gain']
-    phases = json_data['gains']['phase_offset']
-
-    for d in json_data['data']: # TODO deal with multiple observations in the JSON file later.
-        vis_json, source_json = d
-        cv, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
-        src_list = source_json
-
-    # FIXME. These appear to be weird polarization codes (or ID's). WHY oh WHY are they called corr?
-    # We use RR antennas, so this should be either RR or I?. I'm using FITS code 1 for this 'I'
-    if ARGS.pol2:
-        pol_feeds = [ 'RR', 'LL' ]
-    else:
-        pol_feeds = [ 'RR' ]
-
     print("Writing measurement set '{}'...".format(ARGS.ms))
-    ms_create(ms_table_name=ARGS.ms, info = info['info'],
-              ant_pos = ant_pos,
-              cal_vis = cv, timestamps=timestamp,
-              pol_feeds=pol_feeds, sources=src_list)
+    ms_from_json(ARGS.ms, json_data, ARGS.pol2):
     print("Measurement set writing complete.")

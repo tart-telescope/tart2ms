@@ -2,6 +2,10 @@
 
 Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measurement set format. This module relies on the excellent dask-ms module as a helper to create the measurement sets. 
 
+## Install
+
+    sudo pip3 install tart2ms
+
 ## Examples
 
 Download data from the TART in real time via the RESTful API (defaults to using the API at https://tart.elec.ac.nz/signal):
@@ -16,7 +20,7 @@ To synthesize (using wsclean) the image from the measurement set:
 
     wsclean -name test -size 1280 1280 -scale 0.0275 -niter 0 data.ms
  
-This will create an image called test-image.fits
+This will create an image called test-image.fits. You will need to install wsclean on your system.
 
 ## Usage
 

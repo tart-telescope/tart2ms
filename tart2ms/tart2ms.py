@@ -26,6 +26,8 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.utils import iers
 
 from tart.util import constants
+from tart.operation import settings
+from tart_tools import api_imaging
 
 LOGGER = logging.getLogger()
 
@@ -138,6 +140,11 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     
     Parameters
     ----------
+    
+    ms_table_name : string
+        The name of the MS top level directory. I think this only workds in 
+        the local directory.
+    
     info : JSON
         "info": {
             "info": {
@@ -166,7 +173,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     LOGGER.info("Time {}".format(epoch_s))
 
     loc = info['location']
-    # Sort out the coordinate frames
+    # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
     iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all' 
     iers.conf.auto_max_age = None 
@@ -426,3 +433,26 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
 
     dask.compute(spw_writes)
     dask.compute(ddid_writes)
+
+
+def ms_from_json(ms_name, json_data, pol2):
+    info = json_data['info']
+    ant_pos = json_data['ant_pos']
+    config = settings.from_api_json(info['info'], ant_pos)
+    gains = json_data['gains']['gain']
+    phases = json_data['gains']['phase_offset']
+
+    for d in json_data['data']: # TODO deal with multiple observations in the JSON file later.
+        vis_json, source_json = d
+        cv, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
+        src_list = source_json
+
+    if pol2:
+        pol_feeds = [ 'RR', 'LL' ]
+    else:
+        pol_feeds = [ 'RR' ]
+
+    ms_create(ms_table_name=ms_name, info = info['info'],
+              ant_pos = ant_pos,
+              cal_vis = cv, timestamps=timestamp,
+              pol_feeds=pol_feeds, sources=src_list)
