@@ -64,5 +64,5 @@ if __name__ == "__main__":
                     }
     
     print("Writing measurement set '{}'...".format(ARGS.ms))
-    ms_from_json(ARGS.ms, json_data, ARGS.pol2):
+    ms_from_json(ARGS.ms, json_data, ARGS.pol2)
     print("Measurement set writing complete.")

@@ -88,7 +88,7 @@ MS_STOKES_ENUMS = {
     "PFlinear": 31,
     "Pangle": 32}
 
-# These are Jones vectors in a linarly polarized basis [E_x, E_y]
+# These are Jones vectors in a linearly polarized basis [E_x, E_y]
 _ZZ = 1.0 / np.sqrt(2)
 POL_RESPONSES = {
     'XX': [1.0, 0.0],
@@ -348,6 +348,8 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
             "NUM_CHAN": (("row",), dask_num_chan),
             "CHAN_FREQ": (("row", "chan"), dask_chan_freq),
             "CHAN_WIDTH": (("row", "chan"), dask_chan_width),
+            "EFFECTIVE_BW": (("row", "chan"), dask_chan_width),
+            "RESOLUTION": (("row", "chan"), dask_chan_width),
         })
 
         spw_datasets.append(dataset)
