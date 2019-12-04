@@ -400,18 +400,24 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
 
         data_chunks = tuple((chunks['row'], chan, corr))
         dask_data = da.from_array(np_data, chunks=data_chunks)
+        
+        flag_categories = da.from_array(0.05*np.ones((row, chan, corr, 1)))
+        flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
 
         uvw_data = da.from_array(np_uvw)
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks['row'], dtype=np.int32)
         dataset = Dataset({
             'DATA': (dims, dask_data),
+            'FLAG': (dims, da.from_array(flag_data)),
             'TIME': (("row", "corr"), da.from_array(epoch_s*np.ones((row, corr)))),
             'TIME_CENTROID': (("row", "corr"), da.from_array(epoch_s*np.ones((row, corr)))),
             'WEIGHT': (("row", "corr"), da.from_array(0.95*np.ones((row, corr)))),
             'WEIGHT_SPECTRUM': (dims, da.from_array(0.95*np.ones_like(np_data, dtype=np.float64))),
             'SIGMA_SPECTRUM': (dims, da.from_array(np.ones_like(np_data, dtype=np.float64)*0.05)),
+            'SIGMA': (("row", "corr"), da.from_array(0.05*np.ones((row, corr)))),
             'UVW': (("row", "uvw",), uvw_data),
+            'FLAG_CATEGORY': (('row', 'flagcat', 'chan', 'corr'), flag_categories), # {'dims': ('flagcat', 'chan', 'corr')}
             'ANTENNA1': (("row",), da.from_array(baselines[:, 0])),
             'ANTENNA2': (("row",), da.from_array(baselines[:, 1])),
             'FEED1': (("row",), da.from_array(baselines[:, 0])),

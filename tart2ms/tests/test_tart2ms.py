@@ -22,10 +22,10 @@ class TestTart2MS(unittest.TestCase):
             self.json_data = json.load(json_file)
             
     def test_local_dir(self):
-        shutil.rmtree(TEST_MS, ignore_errors=True)
-        ms_from_json(TEST_MS, self.json_data, pol2=False)
-        self.assertTrue(os.path.exists(TEST_MS))
-        shutil.rmtree(TEST_MS)
+        shutil.rmtree('test.ms', ignore_errors=True)
+        ms_from_json('test.ms', self.json_data, pol2=False)
+        self.assertTrue(os.path.exists('test.ms'))
+        shutil.rmtree('test.ms')
 
     def test_tmp_dir(self):
         shutil.rmtree(TEST_MS, ignore_errors=True)
