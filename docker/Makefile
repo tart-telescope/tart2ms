@@ -1,5 +1,7 @@
-casa:
+
+run:
 	xhost +
-	docker-compose up -d --build
 	docker-compose run --rm casa
+casa:
+	docker-compose up -d --build
 

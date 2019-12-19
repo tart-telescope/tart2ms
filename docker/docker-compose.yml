@@ -12,7 +12,7 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - './:/remote'
+      - '/home/tim/astro/:/remote'
       - ${XAUTHORITY}:/tmp/.Xauthority
       - /tmp/.X11-unix:/tmp/.X11-unix
     environment:

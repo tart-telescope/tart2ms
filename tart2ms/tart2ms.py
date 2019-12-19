@@ -252,7 +252,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
         'FEED_ID': (("row",), feed_ids),
         'NUM_RECEPTORS': (("row",), num_receptors),
         'POLARIZATION_TYPE': (("row", "receptors",),
-                              da.asarray(polarization_types)),
+                              da.from_array(polarization_types, chunks=num_ant)),
         'RECEPTOR_ANGLE': (("row", "receptors",),
                            da.from_array(receptor_angles, chunks=num_ant)),
         'POL_RESPONSE': (("row", "receptors", "receptors-2"),
@@ -267,7 +267,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     
     direction = [[phase_j2000.ra.radian, phase_j2000.dec.radian]] 
     field_direction = da.asarray(direction)[None, :]
-    field_name = da.asarray(np.asarray(['up'], dtype=np.object))
+    field_name = da.asarray(np.asarray(['up'], dtype=np.object), chunks=1)
     field_num_poly = da.zeros(1) # Zero order polynomial in time for phase center.
 
     dir_dims = ("row", 'field-poly', 'field-dir',)
@@ -284,9 +284,9 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
    ######################### OBSERVATION dataset #####################################
 
     dataset = Dataset({
-        'TELESCOPE_NAME': (("row",), da.asarray(np.asarray(['TART'], dtype=np.object))),
-        'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=np.object))),
-        "TIME_RANGE": (("row","obs-exts"), da.asarray(np.array([[epoch_s, epoch_s+1]]))),
+        'TELESCOPE_NAME': (("row",), da.asarray(np.asarray(['TART'], dtype=np.object), chunks=1)),
+        'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=np.object), chunks=1)),
+        "TIME_RANGE": (("row","obs-exts"), da.asarray(np.array([[epoch_s, epoch_s+1]]), chunks=1)),
     })
     obs_table.append(dataset)
 
@@ -301,7 +301,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
         #LOGGER.info("SOURCE: {}, timestamp: {}".format(name, timestamps))
         dask_num_lines = da.full((1,), 1, dtype=np.int32)
         dask_direction = da.asarray(direction)[None, :]
-        dask_name = da.asarray(np.asarray([name], dtype=np.object))
+        dask_name = da.asarray(np.asarray([name], dtype=np.object), chunks=1)
         dask_time = da.asarray(np.array([epoch_s]))
         dataset = Dataset({
             "NUM_LINES": (("row",), dask_num_lines),
@@ -375,7 +375,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     }
     baselines = np.array(baselines)
     bl_pos = np.array(ant_pos)[baselines]
-    uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T/constants.L1_WAVELENGTH
+    uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T #/constants.L1_WAVELENGTH
     # Use the - sign to get the same orientation as our tart projections.
 
     uvw_array = np.array([uu_a, vv_a, ww_a]).T
