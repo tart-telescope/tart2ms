@@ -18,7 +18,7 @@ upload:
 	python3 setup.py sdist
 	twine upload --repository pypi dist/*
 
-JSON='/home/tim/github/TART/doc/misc/measurement_set/data_2019_08_04_21_38_31_UTC.json'
+JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
 test:
 	rm -rf test.ms
 	tart2ms --json ${JSON} --ms test.ms 
