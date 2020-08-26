@@ -12,12 +12,13 @@ from tart_tools import api_handler
 from tart_tools import api_imaging
 from tart.operation import settings
 
-from tart2ms import ms_from_json
+from tart2ms import ms_from_json, ms_from_hdf5
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--json', required=False, default=None, help="Snapshot observation  JSON file (visiblities, positions and more).")
+    parser.add_argument('--hdf', required=False, default=None, help="Visibility hdf5 file (One minutes worth of visibility data).")
     parser.add_argument('--ms', required=False, default='tart.ms', help="Output MS table name.")
     parser.add_argument('--api', required=False, default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
     parser.add_argument('--catalog', required=False, default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
@@ -43,6 +44,17 @@ if __name__ == "__main__":
         with open(ARGS.json, 'r') as json_file:
             json_data = json.load(json_file)
             
+        print("Writing measurement set '{}'...".format(ARGS.ms))
+        ms_from_json(ARGS.ms, json_data, ARGS.pol2)
+        print("Measurement set writing complete.")
+            
+    elif ARGS.hdf:
+        print("Getting Data from file: {}".format(ARGS.hdf))
+        # Load data from a HDF5 file
+        print("Writing measurement set '{}'...".format(ARGS.ms))
+        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2)
+        print("Measurement set writing complete.")
+            
     else:
         print("Getting Data from API: {}".format(ARGS.api))
         api = api_handler.APIhandler(ARGS.api)
@@ -63,6 +75,6 @@ if __name__ == "__main__":
                      'data': [[vis_json, src_json]]
                     }
     
-    print("Writing measurement set '{}'...".format(ARGS.ms))
-    ms_from_json(ARGS.ms, json_data, ARGS.pol2)
-    print("Measurement set writing complete.")
+        print("Writing measurement set '{}'...".format(ARGS.ms))
+        ms_from_json(ARGS.ms, json_data, ARGS.pol2)
+        print("Measurement set writing complete.")

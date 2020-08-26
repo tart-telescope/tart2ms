@@ -57,6 +57,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.2.0b1 Add importing of HDF5 files saved from the web app.
 - 0.1.4b4 clean up some bitrot in dask-ms (dealing with chunking objects)
 - 0.1.4b3 Add SIGMA, FLAG, FLAG_CATEGORY to main table (:/)
 - 0.1.4b1 Add RESOLUTION and EFFECTIVE_BW to the SPECTRAL_WINDOW

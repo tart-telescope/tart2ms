@@ -6,4 +6,4 @@
     License. GPLv3.
 '''
 from .tart2ms import MS_STOKES_ENUMS
-from .tart2ms import ms_from_json
+from .tart2ms import ms_from_json, ms_from_hdf5

@@ -11,7 +11,7 @@ with open('README.md') as f:
     readme = f.read()
 
 setup(name='tart2ms',
-    version='0.1.4b4',
+    version='0.1.4b5',
     description='Convert TART observation data to Measurement Sets',
     long_description=readme,
     long_description_content_type="text/markdown",
@@ -19,7 +19,7 @@ setup(name='tart2ms',
     author='Tim Molteno',
     author_email='tim@elec.ac.nz',
     license='GPLv3',
-    install_requires=['dask-ms', 'python-casacore', 'tart', 'tart_tools', 'astropy', 'numpy'],
+    install_requires=['dask-ms', 'python-casacore', 'tart', 'tart_tools', 'astropy', 'numpy', 'h5py'],
     test_suite='nose.collector',
     tests_require=['nose'],
     packages=['tart2ms'],

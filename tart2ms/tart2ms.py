@@ -10,6 +10,9 @@
 '''
 import logging
 from itertools import product
+import h5py
+import dateutil
+import json
 
 import dask
 import dask.array as da
@@ -28,6 +31,8 @@ from astropy.utils import iers
 from tart.util import constants
 from tart.operation import settings
 from tart_tools import api_imaging
+from tart.imaging.visibility import Visibility
+from tart.imaging import calibration
 
 LOGGER = logging.getLogger()
 
@@ -172,7 +177,10 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
     epoch_s = timestamp_to_ms_epoch(timestamps)
     LOGGER.info("Time {}".format(epoch_s))
 
-    loc = info['location']
+    try:
+        loc = info['location']
+    except:
+        loc = info
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
     iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all' 
@@ -441,6 +449,51 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
 
     dask.compute(spw_writes)
     dask.compute(ddid_writes)
+
+
+def ms_from_hdf5(ms_name, h5file, pol2):
+    if pol2:
+        pol_feeds = [ 'RR', 'LL' ]
+    else:
+        pol_feeds = [ 'RR' ]
+
+    with h5py.File(h5file, "r") as h5f:
+        config_string = np.string_(h5f['config'][0]).decode('UTF-8')
+        LOGGER.info("config_string = {}".format(config_string))
+        
+        config_json = json.loads(config_string)
+        config_json['operating_frequency'] = config_json['frequency']
+        
+        LOGGER.info("config_json = {}".format(json.dumps(config_json, indent=4, sort_keys=True)))
+        config = settings.from_json(config_string)
+        hdf_baselines = h5f['baselines'][:]
+        hdf_phase_elaz = h5f['phase_elaz'][:]
+
+        ant_pos = h5f['antenna_positions'][:]
+        
+        gains = h5f['gains'][:]
+        phases = h5f['phases'][:]
+
+        hdf_timestamps = h5f['timestamp']
+        timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
+        
+        hdf_vis = h5f['vis'][:]
+    
+        for ts, v in zip(timestamps, hdf_vis):
+            vis = Visibility(config=config, timestamp=ts)
+            vis.set_visibilities(v=v, b=hdf_baselines)
+            vis.phase_el = hdf_phase_elaz[0]
+            vis.phase_az = hdf_phase_elaz[1]
+
+            cal_vis = calibration.CalibratedVisibility(vis)
+            cal_vis.set_gain(np.arange(24), gains)
+            cal_vis.set_phase_offset(np.arange(24), phases)
+
+            name = "{}_{}".format(ms_name, ts)
+            ms_create(ms_table_name=name, info = config_json,
+                    ant_pos = ant_pos,
+                    cal_vis = cal_vis, timestamps=ts,
+                    pol_feeds=pol_feeds, sources=[])
 
 
 def ms_from_json(ms_name, json_data, pol2):
