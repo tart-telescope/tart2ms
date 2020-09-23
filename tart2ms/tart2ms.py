@@ -489,7 +489,11 @@ def ms_from_hdf5(ms_name, h5file, pol2):
             cal_vis.set_gain(np.arange(24), gains)
             cal_vis.set_phase_offset(np.arange(24), phases)
 
-            name = "{}_{}".format(ms_name, ts)
+            name = "{}_{}.ms".format(ms_name, ts)
+            
+            import re
+            name = re.sub(r'[^\w_\.]', '_', name)
+    
             ms_create(ms_table_name=name, info = config_json,
                     ant_pos = ant_pos,
                     cal_vis = cal_vis, timestamps=ts,
