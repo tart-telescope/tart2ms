@@ -481,7 +481,7 @@ def ms_from_hdf5(ms_name, h5file, pol2):
     
         for ts, v in zip(timestamps, hdf_vis):
             vis = Visibility(config=config, timestamp=ts)
-            vis.set_visibilities(v=v, b=hdf_baselines)
+            vis.set_visibilities(v=v, b=hdf_baselines.tolist())
             vis.phase_el = hdf_phase_elaz[0]
             vis.phase_az = hdf_phase_elaz[1]
 

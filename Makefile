@@ -18,6 +18,12 @@ upload:
 	python3 setup.py sdist
 	twine upload --repository pypi dist/*
 
+HDF='../disko/test_data/vis_2021-03-25_20_50_23.568474.hdf'
+h5:
+	rm -rf test.ms
+	tart2ms --hdf ${HDF} --ms test.ms 
+# 	wsclean -name test -pol RR -size 1280 1280 -scale 0.0275 -niter 0 test.ms
+
 JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
 test:
 	rm -rf test.ms
