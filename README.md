@@ -36,6 +36,7 @@ This will create an image called test-image.fits. You will need to install wscle
     -h, --help         show this help message and exit
     --json JSON        Snapshot observation JSON file (visiblities, positions
                         and more). (default: None)
+    --hdf HDF          Visibility hdf5 file (One minutes worth of visibility data). (default: None)
     --ms MS            Output MS table name. (default: tart.ms)
     --api API          Telescope API server URL. (default:
                         https://tart.elec.ac.nz/signal)
@@ -57,6 +58,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.2.0b2 Place all visibilities from HDF5 files into a single measurement set..
 - 0.2.0b1 Add importing of HDF5 files saved from the web app.
 - 0.1.4b4 clean up some bitrot in dask-ms (dealing with chunking objects)
 - 0.1.4b3 Add SIGMA, FLAG, FLAG_CATEGORY to main table (:/)

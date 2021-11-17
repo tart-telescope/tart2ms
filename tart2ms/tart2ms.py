@@ -140,7 +140,7 @@ def timestamp_to_ms_epoch(ts):
     return epoch_s
 
 
-def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sources):
+def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources):
     ''' Create a Measurement Set from some TART observations
     
     Parameters
@@ -273,7 +273,7 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
 
     ####################### FIELD dataset #########################################
     
-    direction = [[phase_j2000.ra.radian, phase_j2000.dec.radian]] 
+    direction = [[phase_j2000.ra.radian, phase_j2000.dec.radian]]
     field_direction = da.asarray(direction)[None, :]
     field_name = da.asarray(np.asarray(['up'], dtype=np.object), chunks=1)
     field_num_poly = da.zeros(1) # Zero order polynomial in time for phase center.
@@ -376,12 +376,13 @@ def ms_create(ms_table_name, info, ant_pos, cal_vis, timestamps, pol_feeds, sour
 
     # Now create the associated MS dataset
 
-    vis_data, baselines = cal_vis.get_all_visibility()
-    vis_array = np.array(vis_data, dtype=np.complex64)
+    #vis_data, baselines = cal_vis.get_all_visibility()
+    #vis_array = np.array(vis_data, dtype=np.complex64)
     chunks = {
         "row": (vis_array.shape[0],),
     }
     baselines = np.array(baselines)
+    #LOGGER.info(f"baselines {baselines}")
     bl_pos = np.array(ant_pos)[baselines]
     uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T #/constants.L1_WAVELENGTH
     # Use the - sign to get the same orientation as our tart projections.
@@ -479,6 +480,10 @@ def ms_from_hdf5(ms_name, h5file, pol2):
         
         hdf_vis = h5f['vis'][:]
     
+        all_times = []
+        all_vis = []
+        all_baselines = []
+
         for ts, v in zip(timestamps, hdf_vis):
             vis = Visibility(config=config, timestamp=ts)
             vis.set_visibilities(v=v, b=hdf_baselines.tolist())
@@ -489,14 +494,25 @@ def ms_from_hdf5(ms_name, h5file, pol2):
             cal_vis.set_gain(np.arange(24), gains)
             cal_vis.set_phase_offset(np.arange(24), phases)
 
-            name = "{}_{}.ms".format(ms_name, ts)
+            vis_data, baselines = cal_vis.get_all_visibility()
+            vis_array = np.array(vis_data, dtype=np.complex64)
+
+
+            all_vis.append(vis_array)
+            for bl in baselines:
+                all_baselines.append(bl)
+            all_times.append(ts)
+
+            #name = "{}_{}.ms".format(ms_name, ts)
             
-            import re
-            name = re.sub(r'[^\w_\.]', '_', name)
+            #import re
+            #name = re.sub(r'[^\w_\.]', '_', name)
     
-            ms_create(ms_table_name=name, info = config_json,
+        all_vis = np.array(all_vis).flatten()
+        all_baselines = np.array(all_baselines)
+        ms_create(ms_table_name=ms_name, info = config_json,
                     ant_pos = ant_pos,
-                    cal_vis = cal_vis, timestamps=ts,
+                    vis_array = all_vis, baselines=all_baselines, timestamps=ts,
                     pol_feeds=pol_feeds, sources=[])
 
 
@@ -509,7 +525,7 @@ def ms_from_json(ms_name, json_data, pol2):
 
     for d in json_data['data']: # TODO deal with multiple observations in the JSON file later.
         vis_json, source_json = d
-        cv, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
+        cal_vis, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
         src_list = source_json
 
     if pol2:
@@ -517,7 +533,10 @@ def ms_from_json(ms_name, json_data, pol2):
     else:
         pol_feeds = [ 'RR' ]
 
+    vis_data, baselines = cal_vis.get_all_visibility()
+    vis_array = np.array(vis_data, dtype=np.complex64)
+
     ms_create(ms_table_name=ms_name, info = info['info'],
               ant_pos = ant_pos,
-              cal_vis = cv, timestamps=timestamp,
+              vis_array = vis_array, baselines=baselines, timestamps=timestamp,
               pol_feeds=pol_feeds, sources=src_list)
