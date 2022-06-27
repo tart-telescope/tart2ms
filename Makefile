@@ -7,7 +7,7 @@ WSCLEAN=export OPENBLAS_NUM_THREADS=1; wsclean -name test -pol RR -size 1000 100
 MS=test.ms
 
 develop:
-	sudo python3 setup.py develop
+	pip3 install -e .
 
 lint:
 	pylint --extension-pkg-whitelist=numpy --ignored-modules=numpy,tart_tools,dask,dask.array --extension-pkg-whitelist=astropy --extension-pkg-whitelist=dask tart2ms
