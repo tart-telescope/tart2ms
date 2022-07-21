@@ -1,6 +1,6 @@
 # tart2ms
 
-[![PyPI package](https://img.shields.io/badge/pip%20install-example--pypi--package-brightgreen)](https://pypi.org/tmolteno/tart2ms) [![version number](https://img.shields.io/pypi/v/example-pypi-package?color=green&label=version)](https://github.com/tart-telescope/tart2ms/releases) [![License](https://img.shields.io/github/license/tart-telescope/tart2ms)](https://github.com/tart-telescope/tart2ms/blob/main/LICENSE)
+[![PyPI package](https://img.shields.io/badge/pip%20install-tart2ms-brightgreen)](https://pypi.org/project/tart2ms) [![version number](https://img.shields.io/pypi/v/example-pypi-package?color=green&label=version)](https://github.com/tart-telescope/tart2ms/tags) [![License](https://img.shields.io/github/license/tart-telescope/tart2ms)](https://github.com/tart-telescope/tart2ms/blob/main/LICENSE.txt)
 
 
 Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measurement set format. This module relies on the excellent dask-ms module as a helper to create the measurement sets. This packate requires python-casacore to be installed on your system
@@ -59,6 +59,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.2.0b3 Move to the tart-telescope organization on github..
 - 0.2.0b2 Place all visibilities from HDF5 files into a single measurement set..
 - 0.2.0b1 Add importing of HDF5 files saved from the web app.
 - 0.1.4b4 clean up some bitrot in dask-ms (dealing with chunking objects)
