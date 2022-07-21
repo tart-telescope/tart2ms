@@ -1,6 +1,7 @@
 # tart2ms
 
-[![Build Status](https://travis-ci.org/tmolteno/tart2ms.svg?branch=master)](https://travis-ci.org/tmolteno/tart2ms)
+[![PyPI package](https://img.shields.io/badge/pip%20install-example--pypi--package-brightgreen)](https://pypi.org/tmolteno/tart2ms) [![version number](https://img.shields.io/pypi/v/example-pypi-package?color=green&label=version)](https://github.com/tart-telescope/tart2ms/releases) [![License](https://img.shields.io/github/license/tart-telescope/tart2ms)](https://github.com/tart-telescope/tart2ms/blob/main/LICENSE)
+
 
 Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measurement set format. This module relies on the excellent dask-ms module as a helper to create the measurement sets. This packate requires python-casacore to be installed on your system
 
