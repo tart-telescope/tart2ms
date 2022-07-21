@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-n-publish:
-    name: Build and publish tart to PyPI and TestPyPI
+    name: Build and publish tart2ms to PyPI and TestPyPI
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@master
@@ -25,7 +25,7 @@ jobs:
         --sdist
         --wheel
         --outdir dist/
-        tart
+        tart2ms
     - name: Publish distribution to Test PyPI
       uses: pypa/gh-action-pypi-publish@master
       with:
