@@ -25,7 +25,7 @@ upload:
 clean:	${MS}
 	${WSCLEAN} ${MS}
 
-HDF='../disko/test_data/vis_2021-03-25_20_50_23.568474.hdf'
+HDF='./test_data/vis_2021-03-25_20_50_23.568474.hdf'
 h5:
 	rm -rf ${MS}
 	tart2ms --hdf ${HDF} --ms ${MS}

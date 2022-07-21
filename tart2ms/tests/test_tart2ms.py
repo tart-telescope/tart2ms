@@ -13,9 +13,10 @@ import numpy as np
 from tart.operation import settings
 from tart_tools import api_imaging
 
-from tart2ms import ms_from_json
+from tart2ms import ms_from_json, ms_from_hdf5
 import disko
 
+TEST_H5 = './test_data/vis_2021-03-25_20_50_23.568474.hdf'
 TEST_JSON = 'tart2ms/tests/data_test.json'
 TEST_MS = os.path.join(tempfile.gettempdir(), 'test.ms')
 
@@ -85,3 +86,11 @@ class TestTart2MS(unittest.TestCase):
             b = v_arr2[i]
             self.assertAlmostEqual(a,b,6)
             
+    def test_from_h5(self):
+        '''
+            Use an h5 file and read it in...
+        '''
+
+        ms_from_hdf5(ms_name='test_h5.ms', h5file=TEST_H5, pol2=False)
+
+        self.assertTrue(False)

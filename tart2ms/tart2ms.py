@@ -9,15 +9,15 @@
     License. GPLv3.
 '''
 import logging
-from itertools import product
-import h5py
-import dateutil
 import json
-
+import h5py
 import dask
-import dask.array as da
+import dateutil
 
+import dask.array as da
 import numpy as np
+
+from itertools import product
 
 from casacore.measures import measures
 
@@ -30,9 +30,10 @@ from astropy.utils import iers
 
 from tart.util import constants
 from tart.operation import settings
-from tart_tools import api_imaging
 from tart.imaging.visibility import Visibility
 from tart.imaging import calibration
+
+from tart_tools import api_imaging
 
 LOGGER = logging.getLogger()
 
@@ -119,22 +120,22 @@ class MSTable:
         dask.compute(writes)
 
 
-def timestamp_to_ms_epoch(ts):
+def timestamp_to_ms_epoch(t_stamp):
     ''' Convert an timestamp to seconds (epoch values)
         epoch suitable for using in a Measurement Set
-        
+
     Parameters
     ----------
-    ts : A timestamp object.
+    t_stamp : A timestamp object.
 
     Returns
     -------
     t : float
-      The epoch time ``t`` in seconds suitable for fields in 
+      The epoch time ``t`` in seconds suitable for fields in
       measurement sets.
     '''
     dm = measures()
-    epoch = dm.epoch(rf='utc', v0=ts.isoformat())
+    epoch = dm.epoch(rf='utc', v0=t_stamp.isoformat())
     epoch_d = epoch['m0']['value']
     epoch_s = epoch_d*24*60*60.0
     return epoch_s
@@ -142,14 +143,14 @@ def timestamp_to_ms_epoch(ts):
 
 def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources):
     ''' Create a Measurement Set from some TART observations
-    
+
     Parameters
     ----------
-    
+
     ms_table_name : string
-        The name of the MS top level directory. I think this only workds in 
+        The name of the MS top level directory. I think this only workds in
         the local directory.
-    
+
     info : JSON
         "info": {
             "info": {
@@ -171,11 +172,11 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     Returns
     -------
     None
-      
+
     '''
 
     epoch_s = timestamp_to_ms_epoch(timestamps)
-    LOGGER.info("Time {}".format(epoch_s))
+    LOGGER.info(f"Time {epoch_s}")
 
     try:
         loc = info['location']
@@ -183,8 +184,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         loc = info
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
-    iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all' 
-    iers.conf.auto_max_age = None 
+    iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all'
+    iers.conf.auto_max_age = None
 
     location = EarthLocation.from_geodetic(lon=loc['lon']*u.deg,
                                            lat=loc['lat']*u.deg,
@@ -193,7 +194,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     obstime = Time(timestamps)
     local_frame = AltAz(obstime=obstime, location=location)
 
-    phase_altaz = SkyCoord(alt=90.0*u.deg, az=0.0*u.deg, obstime = obstime, frame = 'altaz', location = location)
+    phase_altaz = SkyCoord(alt=90.0*u.deg, az=0.0*u.deg,
+                           obstime = obstime, frame = 'altaz', location = location)
     phase_j2000 = phase_altaz.transform_to('fk5')
 
     # Get the stokes enums for the polarization types
@@ -210,7 +212,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     obs_table = MSTable(ms_table_name, 'OBSERVATION')
     # SOURCE is an optional MS sub-table
     src_table = MSTable(ms_table_name, 'SOURCE')
-    
+
     ddid_table_name = "::".join((ms_table_name, "DATA_DESCRIPTION"))
     spw_table_name = "::".join((ms_table_name, "SPECTRAL_WINDOW"))
 
@@ -271,8 +273,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     feed_table.append(dataset)
 
 
-    ####################### FIELD dataset #########################################
-    
+    ####################### FIELD dataset ####################################
+
     direction = [[phase_j2000.ra.radian, phase_j2000.dec.radian]]
     field_direction = da.asarray(direction)[None, :]
     field_name = da.asarray(np.asarray(['up'], dtype=object), chunks=1)
@@ -301,7 +303,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     ######################## SOURCE datasets ########################################
     for src in sources:
         name = src['name']
-        # Convert to J2000 
+        # Convert to J2000
         dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime,
                              frame = 'altaz', location = location)
         dir_j2000 = dir_altaz.transform_to('fk5')
@@ -398,7 +400,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
         # Create some dask vis data
         dims = ("row", "chan", "corr")
-        LOGGER.info("Data size %s %s %s" % (row, chan, corr))
+        LOGGER.info(f"Data size {row} {chan} {corr}")
 
         #np_data = vis_array.reshape((row, chan, corr))
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
@@ -409,7 +411,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
         data_chunks = tuple((chunks['row'], chan, corr))
         dask_data = da.from_array(np_data, chunks=data_chunks)
-        
+
         flag_categories = da.from_array(0.05*np.ones((row, chan, corr, 1)))
         flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
 
@@ -426,7 +428,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
             'SIGMA_SPECTRUM': (dims, da.from_array(np.ones_like(np_data, dtype=np.float64)*0.05)),
             'SIGMA': (("row", "corr"), da.from_array(0.05*np.ones((row, corr)))),
             'UVW': (("row", "uvw",), uvw_data),
-            'FLAG_CATEGORY': (('row', 'flagcat', 'chan', 'corr'), flag_categories), # {'dims': ('flagcat', 'chan', 'corr')}
+            'FLAG_CATEGORY': (('row', 'flagcat', 'chan', 'corr'), flag_categories),
             'ANTENNA1': (("row",), da.from_array(baselines[:, 0])),
             'ANTENNA2': (("row",), da.from_array(baselines[:, 1])),
             'FEED1': (("row",), da.from_array(baselines[:, 0])),
@@ -461,25 +463,25 @@ def ms_from_hdf5(ms_name, h5file, pol2):
     with h5py.File(h5file, "r") as h5f:
         config_string = np.string_(h5f['config'][0]).decode('UTF-8')
         LOGGER.info("config_string = {}".format(config_string))
-        
+
         config_json = json.loads(config_string)
         config_json['operating_frequency'] = config_json['frequency']
-        
-        LOGGER.info("config_json = {}".format(json.dumps(config_json, indent=4, sort_keys=True)))
+
+        LOGGER.info(f"config_json = {json.dumps(config_json, indent=4, sort_keys=True)}")
         config = settings.from_json(config_string)
         hdf_baselines = h5f['baselines'][:]
         hdf_phase_elaz = h5f['phase_elaz'][:]
 
         ant_pos = h5f['antenna_positions'][:]
-        
+
         gains = h5f['gains'][:]
         phases = h5f['phases'][:]
 
         hdf_timestamps = h5f['timestamp']
         timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
-        
+
         hdf_vis = h5f['vis'][:]
-    
+
         all_times = []
         all_vis = []
         all_baselines = []
@@ -504,15 +506,15 @@ def ms_from_hdf5(ms_name, h5file, pol2):
             all_times.append(ts)
 
             #name = "{}_{}.ms".format(ms_name, ts)
-            
+
             #import re
             #name = re.sub(r'[^\w_\.]', '_', name)
-    
+
         all_vis = np.array(all_vis).flatten()
         all_baselines = np.array(all_baselines)
         ms_create(ms_table_name=ms_name, info = config_json,
                     ant_pos = ant_pos,
-                    vis_array = all_vis, baselines=all_baselines, timestamps=ts,
+                    vis_array = all_vis, baselines=all_baselines, timestamps=all_times,
                     pol_feeds=pol_feeds, sources=[])
 
 
