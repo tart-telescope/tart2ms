@@ -225,8 +225,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     position = da.asarray(ant_pos)
     diameter = da.ones(num_ant) * 0.025
     offset = da.zeros((num_ant, 3))
-    names = np.array(['ANTENNA-%d' % i for i in range(num_ant)], dtype=np.object)
-    stations = np.array([info['name'] for i in range(num_ant)], dtype=np.object)
+    names = np.array(['ANTENNA-%d' % i for i in range(num_ant)], dtype=object)
+    stations = np.array([info['name'] for i in range(num_ant)], dtype=object)
 
     dataset = Dataset({
         'POSITION': (("row", "xyz"), position),
@@ -249,7 +249,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     antenna_ids = da.asarray(range(num_ant))
     feed_ids = da.zeros(num_ant)
     num_receptors = da.zeros(num_ant) + num_pols
-    polarization_types = np.array([pol_types for i in range(num_ant)], dtype=np.object)
+    polarization_types = np.array([pol_types for i in range(num_ant)], dtype=object)
     receptor_angles = np.array([[0.0] for i in range(num_ant)])
     pol_response = np.array([pol_responses for i in range(num_ant)])
 
@@ -275,7 +275,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     
     direction = [[phase_j2000.ra.radian, phase_j2000.dec.radian]]
     field_direction = da.asarray(direction)[None, :]
-    field_name = da.asarray(np.asarray(['up'], dtype=np.object), chunks=1)
+    field_name = da.asarray(np.asarray(['up'], dtype=object), chunks=1)
     field_num_poly = da.zeros(1) # Zero order polynomial in time for phase center.
 
     dir_dims = ("row", 'field-poly', 'field-dir',)
@@ -292,8 +292,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
    ######################### OBSERVATION dataset #####################################
 
     dataset = Dataset({
-        'TELESCOPE_NAME': (("row",), da.asarray(np.asarray(['TART'], dtype=np.object), chunks=1)),
-        'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=np.object), chunks=1)),
+        'TELESCOPE_NAME': (("row",), da.asarray(np.asarray(['TART'], dtype=object), chunks=1)),
+        'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=object), chunks=1)),
         "TIME_RANGE": (("row","obs-exts"), da.asarray(np.array([[epoch_s, epoch_s+1]]), chunks=1)),
     })
     obs_table.append(dataset)
@@ -309,7 +309,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         #LOGGER.info("SOURCE: {}, timestamp: {}".format(name, timestamps))
         dask_num_lines = da.full((1,), 1, dtype=np.int32)
         dask_direction = da.asarray(direction)[None, :]
-        dask_name = da.asarray(np.asarray([name], dtype=np.object), chunks=1)
+        dask_name = da.asarray(np.asarray([name], dtype=object), chunks=1)
         dask_time = da.asarray(np.array([epoch_s]))
         dataset = Dataset({
             "NUM_LINES": (("row",), dask_num_lines),

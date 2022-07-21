@@ -45,9 +45,12 @@ class TestTart2MS(unittest.TestCase):
     def test_uv_equal(self):
         shutil.rmtree(TEST_MS, ignore_errors=True)
         ms_from_json(TEST_MS, self.json_data, pol2=False)
-        u_arr, v_arr, w_arr, frequency, cv_vis, hdr, timestamp = disko.read_ms(TEST_MS, 
+
+        res = disko.Resolution.from_deg(2)
+
+        u_arr, v_arr, w_arr, frequency, cv_vis, hdr, timestamp, rms_arr, indices = disko.read_ms(TEST_MS,
                                                                          num_vis=276, 
-                                                                         res_arcmin=120)
+                                                                         resolution=res)
         logger.info("U shape: {}".format(u_arr.shape))
         
         info = self.json_data['info']
@@ -69,16 +72,16 @@ class TestTart2MS(unittest.TestCase):
 
         baselines, u_arr2, v_arr2, w_arr2 = disko.get_all_uvw(ant_p)
         
-        self.assertAlmostEqual(np.max(u_arr, axis=0), np.max(u_arr2, axis=0))
+        self.assertAlmostEqual(np.max(u_arr, axis=0), np.max(u_arr2, axis=0), 6)
         
         logger.info("U2 shape {}".format(u_arr2.shape))
         
         for i in range(u_arr.shape[0]):
             a = u_arr[i]
             b = u_arr2[i]
-            self.assertAlmostEqual(a,b)
+            self.assertAlmostEqual(a,b,6)
             
             a = v_arr[i]
             b = v_arr2[i]
-            self.assertAlmostEqual(a,b)
+            self.assertAlmostEqual(a,b,6)
             
