@@ -1,7 +1,7 @@
 '''
     A quick attempt to get TART JSON data into a measurement set.
     Author: Tim Molteno, tim@elec.ac.nz
-    Copyright (c) 2019.
+    Copyright (c) 2019-2022.
 
     Official Documentation is Here.
         https://casa.nrao.edu/Memos/229.html#SECTION00044000000000000000
@@ -421,7 +421,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         dataset = Dataset({
             'DATA': (dims, dask_data),
             'FLAG': (dims, da.from_array(flag_data)),
-            'TIME': (("row", "corr"), da.from_array(epoch_s*np.ones((row, corr)))),
+            'TIME': (("row",), da.from_array(epoch_s*np.ones((row,)))),
             'TIME_CENTROID': (("row", "corr"), da.from_array(epoch_s*np.ones((row, corr)))),
             'WEIGHT': (("row", "corr"), da.from_array(0.95*np.ones((row, corr)))),
             'WEIGHT_SPECTRUM': (dims, da.from_array(0.95*np.ones_like(np_data, dtype=np.float64))),

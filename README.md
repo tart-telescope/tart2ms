@@ -59,6 +59,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.2.0b3 Fix bug in the timensions of the TIME column in the MAIN table. Issue 7.
 - 0.2.0b3 Move to the tart-telescope organization on github..
 - 0.2.0b2 Place all visibilities from HDF5 files into a single measurement set..
 - 0.2.0b1 Add importing of HDF5 files saved from the web app.
