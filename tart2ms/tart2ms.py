@@ -525,6 +525,7 @@ def ms_from_json(ms_name, json_data, pol2):
     gains = json_data['gains']['gain']
     phases = json_data['gains']['phase_offset']
 
+    # Note, these do not contain the conjugate pairs, only v[i,j] (and not v[j,i])
     for d in json_data['data']: # TODO deal with multiple observations in the JSON file later.
         vis_json, source_json = d
         cal_vis, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
@@ -535,7 +536,7 @@ def ms_from_json(ms_name, json_data, pol2):
     else:
         pol_feeds = [ 'RR' ]
 
-    vis_data, baselines = cal_vis.get_all_visibility()
+    vis_data, baselines = cal_vis.get_all_visibility() 
     vis_array = np.array(vis_data, dtype=np.complex64)
 
     ms_create(ms_table_name=ms_name, info = info['info'],
