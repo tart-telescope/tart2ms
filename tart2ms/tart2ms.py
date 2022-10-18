@@ -364,17 +364,19 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     # Create multiple SPECTRAL_WINDOW datasets
     # Dataset per output row required because column shapes are variable
 
-    for num_chan in num_freq_channels:
-        dask_num_chan = da.full((1,), num_chan, dtype=np.int32)
-        dask_chan_freq = da.asarray([[info['operating_frequency']]])
-        dask_chan_width = da.full((1, num_chan), 2.5e6/num_chan)
-
+    for spw_i, num_chan in enumerate(num_freq_channels):
+        dask_num_chan = da.full((1,), num_chan, dtype=np.int32, chunks=(1,))
+        dask_chan_freq = da.asarray([[info['operating_frequency']]], chunks=(1, None))
+        dask_chan_width = da.full((1, num_chan), 2.5e6/num_chan, chunks=(1, None))
+        spw_name = da.asarray(np.array([f"IF{spw_i}"], dtype=object), chunks=(1,))
         dataset = Dataset({
             "NUM_CHAN": (("row",), dask_num_chan),
             "CHAN_FREQ": (("row", "chan"), dask_chan_freq),
             "CHAN_WIDTH": (("row", "chan"), dask_chan_width),
             "EFFECTIVE_BW": (("row", "chan"), dask_chan_width),
             "RESOLUTION": (("row", "chan"), dask_chan_width),
+            "TOTAL_BANDWIDTH": (("row",), da.sum(dask_chan_width, axis=1)),
+            "NAME": (("row",), spw_name) 
         })
 
         spw_datasets.append(dataset)
