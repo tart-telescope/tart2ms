@@ -18,7 +18,7 @@ clean:	${MS}
 HDF='./test_data/vis_2021-03-25_20_50_23.568474.hdf'
 h5:
 	rm -rf ${MS}
-	tart2ms --hdf ${HDF} --ms ${MS}
+	tart2ms --hdf ${HDF} --ms ${MS} --override_telescope_name "KAT-7"
 # 	wsclean -name test -pol RR -size 1280 1280 -scale 0.0275 -niter 0 ${MS}
 
 JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
