@@ -3,6 +3,7 @@
 # Convert data from the TART telescope to measurement set format
 #
 import os
+import shutil
 import json
 
 import argparse
@@ -24,7 +25,11 @@ if __name__ == "__main__":
     parser.add_argument('--catalog', required=False, default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
     parser.add_argument('--vis', required=False, default=None, help="Use a local JSON file containing the visibilities  for visibility data")
     parser.add_argument('--pol2', action="store_true", help="Fake a second polarization. Some pipelines choke if there is only one.")
-
+    parser.add_argument('--clobber', '-c', action="store_true", help="Overwrite output ms if exists")
+    parser.add_argument('--phase_center_policy', required=False, default="dump", choices=["dump","observation"],
+                        help="Write out a phase center per {dump,observation}")
+    parser.add_argument('--override_telescope_name', required=False, default="TART",
+                        help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
     ARGS = parser.parse_args()
 
     logger = logging.getLogger()
@@ -36,7 +41,14 @@ if __name__ == "__main__":
     logger.addHandler(ch)
     
     if os.path.isdir(ARGS.ms):
-        raise RuntimeError("Measurement set '{}' exists. Please delete before continuing".format(ARGS.ms))
+        if not ARGS.clobber:
+            raise RuntimeError("Measurement set '{}' exists. Please delete before continuing".format(ARGS.ms))
+        else:
+            if os.path.isdir(ARGS.ms):
+                print("Clobbering '{}' per user request".format(ARGS.ms))
+                shutil.rmtree(ARGS.ms)
+            else:
+                raise RuntimeError("Measurement set path '{}' exists and is not a directory. Refusing to clobber!".format(ARGS.ms))
 
     if ARGS.json:
         print("Getting Data from file: {}".format(ARGS.json))
@@ -45,14 +57,14 @@ if __name__ == "__main__":
             json_data = json.load(json_file)
             
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, json_data, ARGS.pol2)
+        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
             
     elif ARGS.hdf:
         print("Getting Data from file: {}".format(ARGS.hdf))
         # Load data from a HDF5 file
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2)
+        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
             
     else:
@@ -76,5 +88,5 @@ if __name__ == "__main__":
                     }
     
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, json_data, ARGS.pol2)
+        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
