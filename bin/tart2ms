@@ -28,7 +28,8 @@ if __name__ == "__main__":
     parser.add_argument('--clobber', '-c', action="store_true", help="Overwrite output ms if exists")
     parser.add_argument('--phase_center_policy', required=False, default="dump", choices=["dump","observation"],
                         help="Write out a phase center per {dump,observation}")
-
+    parser.add_argument('--override_telescope_name', required=False, default="TART",
+                        help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
     ARGS = parser.parse_args()
 
     logger = logging.getLogger()
@@ -56,14 +57,14 @@ if __name__ == "__main__":
             json_data = json.load(json_file)
             
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy)
+        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
             
     elif ARGS.hdf:
         print("Getting Data from file: {}".format(ARGS.hdf))
         # Load data from a HDF5 file
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2, ARGS.phase_center_policy)
+        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
             
     else:
@@ -87,5 +88,5 @@ if __name__ == "__main__":
                     }
     
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy)
+        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
