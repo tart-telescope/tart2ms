@@ -12,16 +12,6 @@ develop:
 lint:
 	pylint --extension-pkg-whitelist=numpy --ignored-modules=numpy,tart_tools,dask,dask.array --extension-pkg-whitelist=astropy --extension-pkg-whitelist=dask tart2ms
 
-test_upload:
-	rm -rf tart2ms.egg-info dist
-	python3 setup.py sdist
-	twine upload --repository testpypi dist/*
-
-upload:
-	rm -rf tart2ms.egg-info dist
-	python3 setup.py sdist
-	twine upload --repository pypi dist/*
-
 clean:	${MS}
 	${WSCLEAN} ${MS}
 
