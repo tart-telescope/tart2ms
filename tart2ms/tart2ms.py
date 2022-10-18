@@ -29,6 +29,7 @@ import astropy.units as u
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz, Angle
 from astropy.utils import iers
+from astropy.constants import R_earth
 
 from tart.util import constants
 from tart.operation import settings
@@ -234,7 +235,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     # Now convert each antenna location to ECEF coordinates for the measurement set.
     ant_posang = [Angle(np.arctan2(a[1],a[0]), unit=u.rad) for a in ant_pos]
     ant_s = [np.sqrt(a[0]*a[0] + a[1]*a[1])  for a in ant_pos]
-    ant_distance = [s / 6e6  for s in ant_s]
+    ant_distance = [s / R_earth.value  for s in ant_s]
     
     LOGGER.info(ant_posang)
     ant_lon_lat = [ac.offset_by(lon=lon*u.deg, lat=lat*u.deg, posang=theta, distance=d)  for theta, d in zip(ant_posang, ant_distance)]
