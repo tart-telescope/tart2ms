@@ -21,6 +21,8 @@ from itertools import product
 
 from casacore.measures import measures
 
+from astropy import coordinates as ac
+
 from daskms import Dataset, xds_to_table
 
 import astropy.units as u
@@ -141,7 +143,7 @@ def timestamp_to_ms_epoch(t_stamp):
     return epoch_s
 
 
-def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources):
+def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources, phase_center_policy, override_telescope_name):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -174,7 +176,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     None
 
     '''
-
+    lat, lon, height = info["lat"], info["lon"], info["alt"]
+    array_centroid = ac.EarthLocation.from_geodetic(lat, lon, height)
     epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
     LOGGER.info(f"Time {epoch_s}")
 
@@ -224,18 +227,25 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     # Each column in the ANTENNA has a fixed shape so we
     # can represent all rows with one dataset
     num_ant = len(ant_pos)
-    position = da.asarray(ant_pos)
+    position = da.asarray(ant_pos + 
+        np.tile(np.array([array_centroid.x.value,
+                          array_centroid.y.value,
+                          array_centroid.z.value]),
+                (ant_pos.shape[0], 1)))
     diameter = da.ones(num_ant) * 0.025
     offset = da.zeros((num_ant, 3))
     names = np.array(['ANTENNA-%d' % i for i in range(num_ant)], dtype=object)
     stations = np.array([info['name'] for i in range(num_ant)], dtype=object)
-
+    stationtype = np.array(["GROUND-BASED"] * num_ant, dtype=object)
+    stationmount = np.array(["X-Y"] * num_ant, dtype=object)
     dataset = Dataset({
         'POSITION': (("row", "xyz"), position),
         'OFFSET': (("row", "xyz"), offset),
         'DISH_DIAMETER': (("row",), diameter),
         'NAME': (("row",), da.from_array(names, chunks=num_ant)),
         'STATION': (("row",), da.from_array(stations, chunks=num_ant)),
+        'TYPE': (("row",), da.from_array(stationtype, chunks=num_ant)),
+        'MOUNT': (("row",), da.from_array(stationmount, chunks=num_ant)),
     })
     ant_table.append(dataset)
 
@@ -279,6 +289,12 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     assert direction.ndim == 3
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
+    if phase_center_policy == "dump":
+        pass
+    elif phase_center_policy == "observation":
+        direction = direction[:,:,direction.shape[2]//2].reshape(1,2,1)
+    else:
+        raise ValueError(f"phase_center_policy must be one of [dump, observation] got {phase_center_policy}")
     field_direction = da.asarray(
             direction.T.reshape(direction.shape[2],
                                 1, 2).copy(), chunks=(1, None, None)) # nrow x npoly x 2
@@ -298,9 +314,9 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     field_table.append(dataset)
 
    ######################### OBSERVATION dataset #####################################
-
+    LOGGER.info(f"Writing MS for telescope name '{override_telescope_name}'")
     dataset = Dataset({
-        'TELESCOPE_NAME': (("row",), da.asarray(np.asarray(['TART'], dtype=object), chunks=1)),
+        'TELESCOPE_NAME': (("row",), da.asarray(np.asarray([override_telescope_name], dtype=object), chunks=1)),
         'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=object), chunks=1)),
         "TIME_RANGE": (("row","obs-exts"), da.asarray(np.array([[epoch_s[0], epoch_s[-1]]]), chunks=1)),
     })
@@ -355,17 +371,22 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     # Create multiple SPECTRAL_WINDOW datasets
     # Dataset per output row required because column shapes are variable
 
-    for num_chan in num_freq_channels:
-        dask_num_chan = da.full((1,), num_chan, dtype=np.int32)
-        dask_chan_freq = da.asarray([[info['operating_frequency']]])
-        dask_chan_width = da.full((1, num_chan), 2.5e6/num_chan)
-
+    for spw_i, num_chan in enumerate(num_freq_channels):
+        dask_num_chan = da.full((1,), num_chan, dtype=np.int32, chunks=(1,))
+        dask_chan_freq = da.asarray([[info['operating_frequency']]], chunks=(1, None))
+        dask_chan_width = da.full((1, num_chan), 2.5e6/num_chan, chunks=(1, None))
+        spw_name = da.asarray(np.array([f"IF{spw_i}"], dtype=object), chunks=(1,))
+        # TOPO Frame -- we are not regrididng to new reference frequency
+        meas_freq_ref = da.asarray(np.array([5], dtype=int), chunks=(1,))
         dataset = Dataset({
+            "MEAS_FREQ_REF": (("row",), meas_freq_ref), 
             "NUM_CHAN": (("row",), dask_num_chan),
             "CHAN_FREQ": (("row", "chan"), dask_chan_freq),
             "CHAN_WIDTH": (("row", "chan"), dask_chan_width),
             "EFFECTIVE_BW": (("row", "chan"), dask_chan_width),
             "RESOLUTION": (("row", "chan"), dask_chan_width),
+            "TOTAL_BANDWIDTH": (("row",), da.sum(dask_chan_width, axis=1)),
+            "NAME": (("row",), spw_name) 
         })
 
         spw_datasets.append(dataset)
@@ -440,11 +461,20 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         # TODO: This should really be made better - partial dumps should be
         # downweighted
         exposure = intervals.copy()
-        # scan number - treat each integration as a scan
-        scan = np.arange(len(epoch_s)).repeat(nbl) + 1 # offset to start at 1, per convention
-        # each integration should have its own phase tracking centre
-        # to ensure we can rephase them to a common frame in the end
-        field_no = scan.copy() - 1 # offset to start at 0 (FK)
+        
+        if phase_center_policy == "dump":
+            # scan number - treat each integration as a scan
+            scan = np.arange(len(epoch_s), dtype=int).repeat(nbl) + 1 # offset to start at 1, per convention
+            # each integration should have its own phase tracking centre
+            # to ensure we can rephase them to a common frame in the end
+            field_no = scan.copy() - 1 # offset to start at 0 (FK)
+        elif phase_center_policy == "observation":
+            # user is just going to get a single zenith position at the observation centoid
+            scan = np.ones(len(epoch_s), dtype=int).repeat(nbl) # start at 1, per convention
+            field_no = np.zeros_like(scan)
+        else:
+            raise ValueError(f"phase_center_policy must be one of [dump, observation] got {phase_center_policy}")
+        
         dataset = Dataset({
             'DATA': (dims, dask_data),
             'FLAG': (dims, da.from_array(flag_data)),
@@ -490,7 +520,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     dask.compute(ddid_writes)
 
 
-def ms_from_hdf5(ms_name, h5file, pol2):
+def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name):
+    LOGGER.info(f"Dumping phase center per {phase_center_policy}")
     if pol2:
         pol_feeds = [ 'RR', 'LL' ]
     else:
@@ -551,10 +582,12 @@ def ms_from_hdf5(ms_name, h5file, pol2):
         ms_create(ms_table_name=ms_name, info = config_json,
                     ant_pos = ant_pos,
                     vis_array = all_vis, baselines=all_baselines, timestamps=all_times,
-                    pol_feeds=pol_feeds, sources=[])
+                    pol_feeds=pol_feeds, sources=[], phase_center_policy=phase_center_policy,
+                    override_telescope_name=override_telescope_name)
 
 
-def ms_from_json(ms_name, json_data, pol2):
+def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telescope_name):
+    LOGGER.info(f"Dumping phase center per {phase_center_policy}")
     info = json_data['info']
     ant_pos = json_data['ant_pos']
     config = settings.from_api_json(info['info'], ant_pos)
@@ -577,4 +610,5 @@ def ms_from_json(ms_name, json_data, pol2):
     ms_create(ms_table_name=ms_name, info = info['info'],
               ant_pos = ant_pos,
               vis_array = vis_array, baselines=baselines, timestamps=timestamp,
-              pol_feeds=pol_feeds, sources=src_list)
+              pol_feeds=pol_feeds, sources=src_list, phase_center_policy=phase_center_policy,
+              override_telescope_name=override_telescope_name)
