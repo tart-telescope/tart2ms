@@ -422,7 +422,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
             'DATA': (dims, dask_data),
             'FLAG': (dims, da.from_array(flag_data)),
             'TIME': (("row",), da.from_array(epoch_s*np.ones((row,)))),
-            'TIME_CENTROID': (("row", "corr"), da.from_array(epoch_s*np.ones((row, corr)))),
+            'TIME_CENTROID': (("row",), da.from_array(epoch_s*np.ones((row,)))),
             'WEIGHT': (("row", "corr"), da.from_array(0.95*np.ones((row, corr)))),
             'WEIGHT_SPECTRUM': (dims, da.from_array(0.95*np.ones_like(np_data, dtype=np.float64))),
             'SIGMA_SPECTRUM': (dims, da.from_array(np.ones_like(np_data, dtype=np.float64)*0.05)),

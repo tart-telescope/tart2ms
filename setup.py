@@ -11,7 +11,7 @@ with open('README.md') as f:
     readme = f.read()
 
 setup(name='tart2ms',
-    version='0.2.1b4',
+    version='0.2.1b5',
     description='Convert TART observation data to Measurement Sets',
     long_description=readme,
     long_description_content_type="text/markdown",
