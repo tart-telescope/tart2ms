@@ -369,7 +369,10 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         dask_chan_freq = da.asarray([[info['operating_frequency']]], chunks=(1, None))
         dask_chan_width = da.full((1, num_chan), 2.5e6/num_chan, chunks=(1, None))
         spw_name = da.asarray(np.array([f"IF{spw_i}"], dtype=object), chunks=(1,))
+        # TOPO Frame -- we are not regrididng to new reference frequency
+        meas_freq_ref = da.asarray(np.array([5], dtype=int), chunks=(1,))
         dataset = Dataset({
+            "MEAS_FREQ_REF": (("row",), meas_freq_ref), 
             "NUM_CHAN": (("row",), dask_num_chan),
             "CHAN_FREQ": (("row", "chan"), dask_chan_freq),
             "CHAN_WIDTH": (("row", "chan"), dask_chan_width),
