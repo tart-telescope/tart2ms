@@ -229,13 +229,16 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     offset = da.zeros((num_ant, 3))
     names = np.array(['ANTENNA-%d' % i for i in range(num_ant)], dtype=object)
     stations = np.array([info['name'] for i in range(num_ant)], dtype=object)
-
+    stationtype = np.array(["GROUND-BASED"] * num_ant, dtype=object)
+    stationmount = np.array(["X-Y"] * num_ant, dtype=object)
     dataset = Dataset({
         'POSITION': (("row", "xyz"), position),
         'OFFSET': (("row", "xyz"), offset),
         'DISH_DIAMETER': (("row",), diameter),
         'NAME': (("row",), da.from_array(names, chunks=num_ant)),
         'STATION': (("row",), da.from_array(stations, chunks=num_ant)),
+        'TYPE': (("row",), da.from_array(stationtype, chunks=num_ant)),
+        'MOUNT': (("row",), da.from_array(stationmount, chunks=num_ant)),
     })
     ant_table.append(dataset)
 
