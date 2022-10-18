@@ -24,7 +24,7 @@ h5:
 JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
 test:
 	rm -rf ${MS}
-	tart2ms --json ${JSON} --ms ${MS}
+	tart2ms --json ${JSON} --ms ${MS} --override_telescope_name "KAT-7"
 
 test2:
 	rm -rf ${MS}
