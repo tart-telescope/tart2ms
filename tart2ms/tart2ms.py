@@ -27,7 +27,7 @@ from daskms import Dataset, xds_to_table
 
 import astropy.units as u
 from astropy.time import Time
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz, Angle
 from astropy.utils import iers
 
 from tart.util import constants
@@ -176,15 +176,18 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     None
 
     '''
-    lat, lon, height = info["lat"], info["lon"], info["alt"]
-    array_centroid = ac.EarthLocation.from_geodetic(lat, lon, height)
-    epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
-    LOGGER.info(f"Time {epoch_s}")
-
     try:
         loc = info['location']
     except:
         loc = info
+
+    lat, lon, height = loc["lat"], loc["lon"], loc["alt"]
+    LOGGER.info(f"pos {lat, lon, height}")
+
+    array_centroid = ac.EarthLocation.from_geodetic(lat=lat, lon=lon, height=height)
+    epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
+    LOGGER.info(f"Time {epoch_s}")
+
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
     iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all'
@@ -227,11 +230,22 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     # Each column in the ANTENNA has a fixed shape so we
     # can represent all rows with one dataset
     num_ant = len(ant_pos)
-    position = da.asarray(ant_pos + 
-        np.tile(np.array([array_centroid.x.value,
-                          array_centroid.y.value,
-                          array_centroid.z.value]),
-                (ant_pos.shape[0], 1)))
+    
+    # Now convert each antenna location to ECEF coordinates for the measurement set.
+    ant_posang = [Angle(np.arctan2(a[1],a[0]), unit=u.rad) for a in ant_pos]
+    ant_s = [np.sqrt(a[0]*a[0] + a[1]*a[1])  for a in ant_pos]
+    ant_distance = [s / 6e6  for s in ant_s]
+    
+    LOGGER.info(ant_posang)
+    ant_lon_lat = [ac.offset_by(lon=lon*u.deg, lat=lat*u.deg, posang=theta, distance=d)  for theta, d in zip(ant_posang, ant_distance)]
+    ant_locations = [EarthLocation.from_geodetic(lon=lon,  lat=lat, height=loc['alt']*u.m,  ellipsoid='WGS84') for lon, lat in ant_lon_lat]
+    ant_positions = [[e.x.value, e.y.value, e.z.value] for e in ant_locations]
+    position = da.asarray(ant_positions)
+    # position = da.asarray(ant_pos + 
+    #     np.tile(np.array([array_centroid.x.value,
+    #                       array_centroid.y.value,
+    #                       array_centroid.z.value]),
+    #             (ant_pos.shape[0], 1)))
     diameter = da.ones(num_ant) * 0.025
     offset = da.zeros((num_ant, 3))
     names = np.array(['ANTENNA-%d' % i for i in range(num_ant)], dtype=object)
@@ -323,10 +337,10 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     obs_table.append(dataset)
 
     ######################## SOURCE datasets ########################################
-    for src in sources:
+    if False: #for src in sources:
         name = src['name']
         # Convert to J2000
-        dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime,
+        dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime[0],
                              frame = 'altaz', location = location)
         dir_j2000 = dir_altaz.transform_to('fk5')
         direction = [dir_j2000.ra.radian, dir_j2000.dec.radian]
@@ -610,6 +624,6 @@ def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telesco
 
     ms_create(ms_table_name=ms_name, info = info['info'],
               ant_pos = ant_pos,
-              vis_array = vis_array, baselines=baselines, timestamps=timestamp,
+              vis_array = vis_array, baselines=baselines, timestamps=[timestamp],
               pol_feeds=pol_feeds, sources=src_list, phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name)
