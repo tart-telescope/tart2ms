@@ -287,6 +287,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
                             chunks=1)
     field_num_poly = da.zeros(direction.shape[2], chunks=1) # zeroth order polynomial in time for phase center.
     dir_dims = ("row", 'field-poly', 'field-dir',)
+
     dataset = Dataset({
         'PHASE_DIR': (dir_dims, field_direction),
         'DELAY_DIR': (dir_dims, field_direction),
