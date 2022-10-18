@@ -175,7 +175,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
     '''
 
-    epoch_s = timestamp_to_ms_epoch(timestamps)
+    epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
     LOGGER.info(f"Time {epoch_s}")
 
     try:
@@ -194,7 +194,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     obstime = Time(timestamps)
     local_frame = AltAz(obstime=obstime, location=location)
 
-    phase_altaz = SkyCoord(alt=90.0*u.deg, az=0.0*u.deg,
+    phase_altaz = SkyCoord(alt=[90.0*u.deg]*len(obstime), az=[0.0*u.deg]*len(obstime),
                            obstime = obstime, frame = 'altaz', location = location)
     phase_j2000 = phase_altaz.transform_to('fk5')
 
@@ -275,13 +275,18 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
     ####################### FIELD dataset ####################################
 
-    direction = [[phase_j2000.ra.radian, phase_j2000.dec.radian]]
-    field_direction = da.asarray(direction)[None, :]
-    field_name = da.asarray(np.asarray(['up'], dtype=object), chunks=1)
-    field_num_poly = da.zeros(1) # Zero order polynomial in time for phase center.
-
+    direction = np.array([[phase_j2000.ra.radian, phase_j2000.dec.radian]])
+    assert direction.ndim == 3
+    assert direction.shape[0] == 1
+    assert direction.shape[1] == 2
+    field_direction = da.asarray(
+            direction.T.reshape(direction.shape[2],
+                                1, 2).copy(), chunks=(1, None, None)) # nrow x npoly x 2
+    field_name = da.asarray(np.array(list(map(lambda sn: f'zenith_scan_{sn+1}', range(direction.shape[2]))),
+                                     dtype=object),
+                            chunks=1)
+    field_num_poly = da.zeros(direction.shape[2], chunks=1) # zeroth order polynomial in time for phase center.
     dir_dims = ("row", 'field-poly', 'field-dir',)
-
     dataset = Dataset({
         'PHASE_DIR': (dir_dims, field_direction),
         'DELAY_DIR': (dir_dims, field_direction),
@@ -296,7 +301,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     dataset = Dataset({
         'TELESCOPE_NAME': (("row",), da.asarray(np.asarray(['TART'], dtype=object), chunks=1)),
         'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=object), chunks=1)),
-        "TIME_RANGE": (("row","obs-exts"), da.asarray(np.array([[epoch_s, epoch_s+1]]), chunks=1)),
+        "TIME_RANGE": (("row","obs-exts"), da.asarray(np.array([[epoch_s[0], epoch_s[-1]]]), chunks=1)),
     })
     obs_table.append(dataset)
 
@@ -384,6 +389,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         "row": (vis_array.shape[0],),
     }
     baselines = np.array(baselines)
+    nbl = np.unique(baselines, axis=0).shape[0]
     #LOGGER.info(f"baselines {baselines}")
     bl_pos = np.array(ant_pos)[baselines]
     uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T #/constants.L1_WAVELENGTH
@@ -418,13 +424,34 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         uvw_data = da.from_array(np_uvw)
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks['row'], dtype=np.int32)
+        assert dask_data.shape[0] % len(epoch_s) == 0, "Expected nrow to be divisible by ntime"
+        assert dask_data.shape[0] == len(epoch_s) * nbl
+        epoch_s_arr = np.array(epoch_s)
+        intervals = np.zeros(len(epoch_s_arr), dtype=np.float64)
+        # going to assume the correlator integration interval is constant
+        intervals[:-1] = epoch_s_arr[1:] - epoch_s_arr[:-1]
+        if len(intervals) >= 2:
+            intervals[-1] = intervals[-2]
+        else:
+            intervals[0] = 1.0 # TODO: Fallover what is the default integration interval
+        assert all(np.abs(intervals[1:] - intervals[:-1]) < 0.1), "Correlator dump interval must be regular"
+        intervals = intervals.repeat(nbl)
+        # TODO: This should really be made better - partial dumps should be
+        # downweighted
+        exposure = intervals.copy()
+        # scan number - treat each integration as a scan
+        scan = np.arange(len(epoch_s)).repeat(nbl) + 1 # offset to start at 1, per convention
+        # each integration should have its own phase tracking centre
+        # to ensure we can rephase them to a common frame in the end
+        field_no = scan.copy() - 1 # offset to start at 0 (FK)
         dataset = Dataset({
             'DATA': (dims, dask_data),
             'FLAG': (dims, da.from_array(flag_data)),
-            'TIME': (("row",), da.from_array(epoch_s*np.ones((row,)))),
-            'TIME_CENTROID': (("row", "corr"), da.from_array(epoch_s*np.ones((row, corr)))),
+            'TIME': (("row",), da.from_array(np.repeat(epoch_s, nbl))),
+            'TIME_CENTROID': ("row", da.from_array(np.repeat(epoch_s, nbl))),
             'WEIGHT': (("row", "corr"), da.from_array(0.95*np.ones((row, corr)))),
             'WEIGHT_SPECTRUM': (dims, da.from_array(0.95*np.ones_like(np_data, dtype=np.float64))),
+            # BH: conformance issue, see CASA documentation on weighting
             'SIGMA_SPECTRUM': (dims, da.from_array(np.ones_like(np_data, dtype=np.float64)*0.05)),
             'SIGMA': (("row", "corr"), da.from_array(0.05*np.ones((row, corr)))),
             'UVW': (("row", "uvw",), uvw_data),
@@ -433,7 +460,15 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
             'ANTENNA2': (("row",), da.from_array(baselines[:, 1])),
             'FEED1': (("row",), da.from_array(baselines[:, 0])),
             'FEED2': (("row",), da.from_array(baselines[:, 1])),
-            'DATA_DESC_ID': (("row",), dask_ddid)
+            'DATA_DESC_ID': (("row",), dask_ddid),
+            'PROCESSOR_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
+            'FIELD_ID': (("row",), da.from_array(field_no, chunks=chunks['row'])),
+            'INTERVAL': (("row",), da.from_array(intervals, chunks=chunks['row'])),
+            'EXPOSURE': (("row",), da.from_array(exposure, chunks=chunks['row'])),
+            'SCAN_NUMBER': (("row",), da.from_array(scan, chunks=chunks['row'])),
+            'ARRAY_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
+            'OBSERVATION_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
+            'STATE_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
         })
         ms_datasets.append(dataset)
 
