@@ -26,6 +26,9 @@ if __name__ == "__main__":
     parser.add_argument('--vis', required=False, default=None, help="Use a local JSON file containing the visibilities  for visibility data")
     parser.add_argument('--pol2', action="store_true", help="Fake a second polarization. Some pipelines choke if there is only one.")
     parser.add_argument('--clobber', '-c', action="store_true", help="Overwrite output ms if exists")
+    parser.add_argument('--phase_center_policy', required=False, default="dump", choices=["dump","observation"],
+                        help="Write out a phase center per {dump,observation}")
+
     ARGS = parser.parse_args()
 
     logger = logging.getLogger()
@@ -53,14 +56,14 @@ if __name__ == "__main__":
             json_data = json.load(json_file)
             
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, json_data, ARGS.pol2)
+        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy)
         print("Measurement set writing complete.")
             
     elif ARGS.hdf:
         print("Getting Data from file: {}".format(ARGS.hdf))
         # Load data from a HDF5 file
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2)
+        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2, ARGS.phase_center_policy)
         print("Measurement set writing complete.")
             
     else:
@@ -84,5 +87,5 @@ if __name__ == "__main__":
                     }
     
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, json_data, ARGS.pol2)
+        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy)
         print("Measurement set writing complete.")
