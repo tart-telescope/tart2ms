@@ -59,6 +59,8 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.3.0b3 New features for keeping the phase center constant during a long measurement set (fringe phasing)
+          Fix progress bar.
 - 0.3.0b1 Fix many CASA compatability issues. Antenna positions are done. Many thanks to Ben Hugo of SARAO.
 - 0.2.0b5 Fix bug in the timensions of the TIME_CENTROID column in the MAIN table. Issue 8.
 - 0.2.0b3 Fix bug in the timensions of the TIME column in the MAIN table. Issue 7.
