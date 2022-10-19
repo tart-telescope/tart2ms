@@ -145,7 +145,8 @@ def timestamp_to_ms_epoch(t_stamp):
     return epoch_s
 
 
-def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources, phase_center_policy, override_telescope_name):
+def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources, phase_center_policy, override_telescope_name,
+              uvw_generator='casacore'):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -432,7 +433,19 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     nbl = np.unique(baselines, axis=0).shape[0]
     
     # will use casacore to generate these later
-    uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+    if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
+        LOGGER.warn(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
+                    f"for multi-timestamp databases. Your UVW coordinates will be wrong")
+    if uvw_generator == 'telescope_snapshot':
+        bl_pos = np.array(ant_pos)[baselines]
+        uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T #/constants.L1_WAVELENGTH
+        # Use the - sign to get the same orientation as our tart projections.
+        uvw_array = np.array([uu_a, vv_a, ww_a]).T
+    elif uvw_generator == 'casacore':
+        # to be fixed with our fixvis casacore generator at the end
+        uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+    else:
+        raise ValueError('uvw_generator expects either mode "telescope_snapshot" or "casacore"')
     
     for ddid, (spw_id, pol_id) in enumerate(zip(spw_ids, pol_ids)):
         # Infer row, chan and correlation shape
@@ -536,7 +549,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     dask.compute(ddid_writes)
 
 
-def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name):
+def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore"):
     LOGGER.info(f"Dumping phase center per {phase_center_policy}")
     if pol2:
         pol_feeds = [ 'RR', 'LL' ]
@@ -632,10 +645,17 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 pol_feeds= pol_feeds,
                 sources=[],
                 phase_center_policy=phase_center_policy,
-                override_telescope_name=override_telescope_name)
-    fixms(ms_name)
+                override_telescope_name=override_telescope_name,
+                uvw_generator=uvw_generator)
+    
+    if uvw_generator == 'telescope_snapshot':
+        pass
+    elif uvw_generator == 'casacore':
+        fixms(ms_name)
+    else:
+        raise ValueError('uvw_generator expects either mode "telescope" or "casacore"')
 
-def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telescope_name):
+def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore"):
     LOGGER.info(f"Dumping phase center per {phase_center_policy}")
     info = json_data['info']
     ant_pos = json_data['ant_pos']
@@ -661,5 +681,10 @@ def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telesco
               ant_pos = ant_pos,
               vis_array = vis_array, baselines=baselines, timestamps=[timestamp],
               pol_feeds=pol_feeds, sources=src_list, phase_center_policy=phase_center_policy,
-              override_telescope_name=override_telescope_name)
-    fixms(ms_name)
+              override_telescope_name=override_telescope_name, uvw_generator=uvw_generator)
+    if uvw_generator == 'telescope_snapshot':
+        pass
+    elif uvw_generator == 'casacore':        
+        fixms(ms_name)
+    else:
+        raise ValueError('uvw_generator expects either mode "telescope_snapshot" or "casacore"')

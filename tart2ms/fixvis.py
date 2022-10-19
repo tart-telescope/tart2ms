@@ -30,7 +30,7 @@ class progress():
 
     def next(self):
         if self.__progress is None:
-            if self.__value % int(self.__max * 0.1) == 0:
+            if self.__value % max(int(self.__max * 0.1), 1) == 0:
                 logger.info(f"\t {self.__title} progress: "
                             f"{self.__value *100. / self.__max:.0f}%")
             self.__value += 1
