@@ -32,7 +32,8 @@ class TestTart2MS(unittest.TestCase):
         shutil.rmtree(test_ms, ignore_errors=True)
         ms_from_json(test_ms, self.json_data, pol2=False, 
                     phase_center_policy='dump',
-                    override_telescope_name='TART')
+                    override_telescope_name='TART',
+                    uvw_generator="telescope_snapshot")
 
     def setUp(self):
         with open(TEST_JSON, 'r') as json_file:
@@ -51,7 +52,7 @@ class TestTart2MS(unittest.TestCase):
 
     def test_uv_equal(self):
         self.check_ms(TEST_MS)
-
+        
         res = disko.Resolution.from_deg(2)
 
         u_arr, v_arr, w_arr, frequency, cv_vis, hdr, timestamp, rms_arr, indices = disko.read_ms(TEST_MS,
@@ -97,6 +98,7 @@ class TestTart2MS(unittest.TestCase):
 
         ms_from_hdf5(ms_name='test_h5.ms', h5file=TEST_H5, pol2=False, 
                      phase_center_policy='dump', 
-                     override_telescope_name='TART')
+                     override_telescope_name='TART',
+                     uvw_generator="telescope_snapshot")
 
         self.assertTrue(True)

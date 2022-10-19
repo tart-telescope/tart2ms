@@ -19,7 +19,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--json', required=False, default=None, help="Snapshot observation  JSON file (visiblities, positions and more).")
-    parser.add_argument('--hdf', required=False, default=None, help="Visibility hdf5 file (One minutes worth of visibility data).")
+    parser.add_argument('--hdf', required=False, default=None, nargs="*", help="Visibility hdf5 file (One minutes worth of visibility data).")
     parser.add_argument('--ms', required=False, default='tart.ms', help="Output MS table name.")
     parser.add_argument('--api', required=False, default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
     parser.add_argument('--catalog', required=False, default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
@@ -31,7 +31,6 @@ if __name__ == "__main__":
     parser.add_argument('--override_telescope_name', required=False, default="TART",
                         help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
     ARGS = parser.parse_args()
-
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
