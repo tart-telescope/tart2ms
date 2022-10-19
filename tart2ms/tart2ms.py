@@ -466,12 +466,13 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         epoch_s_arr = np.array(epoch_s)
         intervals = np.zeros(len(epoch_s_arr), dtype=np.float64)
         # going to assume the correlator integration interval is constant
-        intervals[:-1] = epoch_s_arr[1:] - epoch_s_arr[:-1]
         if len(intervals) >= 2:
-            intervals[-1] = intervals[-2]
+            # TODO: BH we need a better way of storing intervals and exposures - this is something
+            # the correlator must tell us -- only it knows this
+            # currently there are edge cases where we have disjoint observations
+            intervals[...] = np.median(epoch_s_arr[1:] - epoch_s_arr[:-1])
         else:
             intervals[0] = 1.0 # TODO: Fallover what is the default integration interval
-        assert all(np.abs(intervals[1:] - intervals[:-1]) < 0.1), "Correlator dump interval must be regular"
         intervals = intervals.repeat(nbl)
         # TODO: This should really be made better - partial dumps should be
         # downweighted
