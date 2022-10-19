@@ -191,9 +191,9 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
-    iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all'
-    iers.conf.auto_max_age = None
-
+    # iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all'
+    # iers.conf.auto_max_age = None
+    # 
     location = EarthLocation.from_geodetic(lon=loc['lon']*u.deg,
                                            lat=loc['lat']*u.deg,
                                            height=loc['alt']*u.m,
