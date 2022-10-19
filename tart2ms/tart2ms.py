@@ -199,7 +199,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
                                            height=loc['alt']*u.m,
                                            ellipsoid='WGS84')
     obstime = Time(timestamps)
-    LOGGER.info(f"obstime {obstime}")
+    LOGGER.debug(f"obstime {obstime}")
 
     # local_frame = AltAz(obstime=obstime, location=location)
     # LOGGER.info(f"local_frame {local_frame}")
@@ -207,7 +207,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     phase_altaz = SkyCoord(alt=[90.0*u.deg]*len(obstime), az=[0.0*u.deg]*len(obstime),
                            obstime = obstime, frame = 'altaz', location = location)
     phase_j2000 = phase_altaz.transform_to('fk5')
-    LOGGER.info(f"phase_j2000 {phase_j2000}")
+    LOGGER.debug(f"phase_j2000 {phase_j2000}")
 
     # Get the stokes enums for the polarization types
     corr_types = [[MS_STOKES_ENUMS[p_f] for p_f in pol_feeds]]
@@ -543,64 +543,97 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
         pol_feeds = [ 'RR', 'LL' ]
     else:
         pol_feeds = [ 'RR' ]
+    if isinstance(h5file, str):
+        h5file = [h5file]
+    all_times = []
+    all_vis = []
+    all_baselines = []
+    ant_pos_orig = None
+    orig_dico_info = None
 
-    with h5py.File(h5file, "r") as h5f:
-        config_string = np.string_(h5f['config'][0]).decode('UTF-8')
-        LOGGER.info("config_string = {}".format(config_string))
+    for ih5, h5 in enumerate(h5file):
+        with h5py.File(h5, "r") as h5f:
+            LOGGER.info(f"Processing h5 database {ih5+1}/{len(h5file)}: '{h5}'")
+            config_string = np.string_(h5f['config'][0]).decode('UTF-8')
+            if ih5 == 0:
+                LOGGER.info("config_string = {}".format(config_string))
 
-        config_json = json.loads(config_string)
-        config_json['operating_frequency'] = config_json['frequency']
+            config_json = json.loads(config_string)
+            config_json['operating_frequency'] = config_json['frequency']
+            if ih5 == 0:
+                LOGGER.info(f"config_json = {json.dumps(config_json, indent=4, sort_keys=True)}")
+            config = settings.from_json(config_string)
+            hdf_baselines = h5f['baselines'][:]
+            hdf_phase_elaz = h5f['phase_elaz'][:]
 
-        LOGGER.info(f"config_json = {json.dumps(config_json, indent=4, sort_keys=True)}")
-        config = settings.from_json(config_string)
-        hdf_baselines = h5f['baselines'][:]
-        hdf_phase_elaz = h5f['phase_elaz'][:]
+            ant_pos = h5f['antenna_positions'][:]
+            if ant_pos_orig is None:
+                ant_pos_orig = ant_pos.copy()
+            if not np.isclose(ant_pos_orig, ant_pos).all():
+                raise RuntimeError("The databases you are trying to concatenate have different antenna layouts. "
+                                   "This is not yet supported. You could try running CASA virtualconcat to "
+                                   "concatenate such heterogeneous databases")
+            if orig_dico_info is None:
+                orig_dico_info = config_json
+            config_same = True
+            print(config_json)
+            for check_key in ["L0_frequency", "bandwidth", "baseband_frequency",
+                              "num_antenna", "operating_frequency", "sampling_frequency",
+                              "lat", "lon", "alt", "orientation", "axes"]:
+                if check_key not in config_json or check_key not in orig_dico_info:
+                    raise RuntimeError(f"Key {check_key} missing from database!")
+                if isinstance(orig_dico_info[check_key], float):
+                    config_same = np.isclose(orig_dico_info[check_key],
+                                             config_json[check_key])
+                elif isinstance(orig_dico_info, list):
+                    config_same = all(orig_dico_info, config_json)
+                else:
+                    config_same = orig_dico_info[check_key] == \
+                                  config_json[check_key]
+            
+            if not config_same:
+                raise RuntimeError("The databases you are trying to concatenate have different configurations. "
+                                   "This is not yet supported. You could try running CASA virtualconcat to "
+                                   "concatenate such heterogeneous databases")
+            gains = h5f['gains'][:]
+            phases = h5f['phases'][:]
 
-        ant_pos = h5f['antenna_positions'][:]
+            hdf_timestamps = h5f['timestamp']
+            timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
 
-        gains = h5f['gains'][:]
-        phases = h5f['phases'][:]
+            hdf_vis = h5f['vis'][:]
 
-        hdf_timestamps = h5f['timestamp']
-        timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
+            for ts, v in zip(timestamps, hdf_vis):
+                vis = Visibility(config=config, timestamp=ts)
+                vis.set_visibilities(v=v, b=hdf_baselines.tolist())
+                vis.phase_el = hdf_phase_elaz[0]
+                vis.phase_az = hdf_phase_elaz[1]
 
-        hdf_vis = h5f['vis'][:]
+                cal_vis = calibration.CalibratedVisibility(vis)
+                cal_vis.set_gain(np.arange(24), gains)
+                cal_vis.set_phase_offset(np.arange(24), phases)
 
-        all_times = []
-        all_vis = []
-        all_baselines = []
+                vis_data, baselines = cal_vis.get_all_visibility()
+                vis_array = np.array(vis_data, dtype=np.complex64)
 
-        for ts, v in zip(timestamps, hdf_vis):
-            vis = Visibility(config=config, timestamp=ts)
-            vis.set_visibilities(v=v, b=hdf_baselines.tolist())
-            vis.phase_el = hdf_phase_elaz[0]
-            vis.phase_az = hdf_phase_elaz[1]
+                all_vis.append(vis_array)
+                for bl in baselines:
+                    all_baselines.append(bl)
+                all_times.append(ts)
 
-            cal_vis = calibration.CalibratedVisibility(vis)
-            cal_vis.set_gain(np.arange(24), gains)
-            cal_vis.set_phase_offset(np.arange(24), phases)
-
-            vis_data, baselines = cal_vis.get_all_visibility()
-            vis_array = np.array(vis_data, dtype=np.complex64)
-
-
-            all_vis.append(vis_array)
-            for bl in baselines:
-                all_baselines.append(bl)
-            all_times.append(ts)
-
-            #name = "{}_{}.ms".format(ms_name, ts)
-
-            #import re
-            #name = re.sub(r'[^\w_\.]', '_', name)
-
-        all_vis = np.array(all_vis).flatten()
-        all_baselines = np.array(all_baselines)
-        ms_create(ms_table_name=ms_name, info = config_json,
-                    ant_pos = ant_pos,
-                    vis_array = all_vis, baselines=all_baselines, timestamps=all_times,
-                    pol_feeds=pol_feeds, sources=[], phase_center_policy=phase_center_policy,
-                    override_telescope_name=override_telescope_name)
+    # finally create concat ms
+    all_vis = np.array(all_vis).flatten()
+    all_baselines = np.array(all_baselines)
+    ms_create(ms_table_name=ms_name,
+                info = orig_dico_info,
+                ant_pos = ant_pos_orig,
+                vis_array = all_vis,
+                baselines= all_baselines,
+                timestamps= all_times,
+                pol_feeds= pol_feeds,
+                sources=[],
+                phase_center_policy=phase_center_policy,
+                override_telescope_name=override_telescope_name)
 
 
 def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telescope_name):
