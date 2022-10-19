@@ -59,7 +59,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
-- 0.2.0b6 Fix many CASA compatability issues. Antenna positions are done. Many thanks to Ben Hugo of SARAO.
+- 0.3.0b1 Fix many CASA compatability issues. Antenna positions are done. Many thanks to Ben Hugo of SARAO.
 - 0.2.0b5 Fix bug in the timensions of the TIME_CENTROID column in the MAIN table. Issue 8.
 - 0.2.0b3 Fix bug in the timensions of the TIME column in the MAIN table. Issue 7.
 - 0.2.0b3 Move to the tart-telescope organization on github..
