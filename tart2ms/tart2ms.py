@@ -199,11 +199,15 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
                                            height=loc['alt']*u.m,
                                            ellipsoid='WGS84')
     obstime = Time(timestamps)
-    local_frame = AltAz(obstime=obstime, location=location)
+    LOGGER.info(f"obstime {obstime}")
+
+    # local_frame = AltAz(obstime=obstime, location=location)
+    # LOGGER.info(f"local_frame {local_frame}")
 
     phase_altaz = SkyCoord(alt=[90.0*u.deg]*len(obstime), az=[0.0*u.deg]*len(obstime),
                            obstime = obstime, frame = 'altaz', location = location)
     phase_j2000 = phase_altaz.transform_to('fk5')
+    LOGGER.info(f"phase_j2000 {phase_j2000}")
 
     # Get the stokes enums for the polarization types
     corr_types = [[MS_STOKES_ENUMS[p_f] for p_f in pol_feeds]]
@@ -233,11 +237,11 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     num_ant = len(ant_pos)
     
     # Now convert each antenna location to ECEF coordinates for the measurement set.
+    # This is laborious but seems to work.
     ant_posang = [Angle(np.arctan2(a[1],a[0]), unit=u.rad) for a in ant_pos]
     ant_s = [np.sqrt(a[0]*a[0] + a[1]*a[1])  for a in ant_pos]
     ant_distance = [s / R_earth.value  for s in ant_s]
     
-    LOGGER.info(ant_posang)
     ant_lon_lat = [ac.offset_by(lon=lon*u.deg, lat=lat*u.deg, posang=theta, distance=d)  for theta, d in zip(ant_posang, ant_distance)]
     ant_locations = [EarthLocation.from_geodetic(lon=lon,  lat=lat, height=loc['alt']*u.m,  ellipsoid='WGS84') for lon, lat in ant_lon_lat]
     ant_positions = [[e.x.value, e.y.value, e.z.value] for e in ant_locations]
@@ -247,6 +251,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     #                       array_centroid.y.value,
     #                       array_centroid.z.value]),
     #             (ant_pos.shape[0], 1)))
+    
+    
     diameter = da.ones(num_ant) * 0.025
     offset = da.zeros((num_ant, 3))
     names = np.array(['ANTENNA-%d' % i for i in range(num_ant)], dtype=object)
@@ -338,18 +344,18 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     obs_table.append(dataset)
 
     ######################## SOURCE datasets ########################################
-    if False: #for src in sources:
+    for src in sources:
         name = src['name']
         # Convert to J2000
         dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime[0],
                              frame = 'altaz', location = location)
         dir_j2000 = dir_altaz.transform_to('fk5')
         direction = [dir_j2000.ra.radian, dir_j2000.dec.radian]
-        #LOGGER.info("SOURCE: {}, timestamp: {}".format(name, timestamps))
-        dask_num_lines = da.full((1,), 1, dtype=np.int32)
-        dask_direction = da.asarray(direction)[None, :]
+        LOGGER.info(f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction}")
+        dask_num_lines = da.asarray(np.asarray([1], dtype=np.int32)) # , 1, dtype=np.int32)
+        dask_direction = da.asarray(np.asarray(direction, dtype=np.float64), chunks=1)[None, :]
         dask_name = da.asarray(np.asarray([name], dtype=object), chunks=1)
-        dask_time = da.asarray(np.array([epoch_s]))
+        dask_time = da.asarray(np.asarray(epoch_s, dtype=object), chunks=1)
         dataset = Dataset({
             "NUM_LINES": (("row",), dask_num_lines),
             "NAME": (("row",), dask_name),
