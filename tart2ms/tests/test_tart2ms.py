@@ -54,8 +54,8 @@ class TestTart2MS(unittest.TestCase):
         res = disko.Resolution.from_deg(2)
 
         u_arr, v_arr, w_arr, frequency, cv_vis, hdr, timestamp, rms_arr, indices = disko.read_ms(TEST_MS,
-                                                                         num_vis=276, 
-                                                                         resolution=res)
+                                                                         num_vis=552, 
+                                                                         angular_resolution=res)
         logger.info("U shape: {}".format(u_arr.shape))
         
         info = self.json_data['info']
