@@ -236,9 +236,10 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     # can represent all rows with one dataset
     num_ant = len(ant_pos)
     
-    # Now convert each antenna location to ECEF coordinates for the measurement set.
+    ########################### Now convert each antenna location to ECEF coordinates for the measurement set. #######################
     # This is laborious but seems to work.
-    ant_posang = [Angle(np.arctan2(a[1],a[0]), unit=u.rad) for a in ant_pos]
+    #
+    ant_posang = [Angle(np.arctan2(a[0],a[1]), unit=u.rad) for a in ant_pos]  # Zero is due north.
     ant_s = [np.sqrt(a[0]*a[0] + a[1]*a[1])  for a in ant_pos]
     ant_distance = [s / R_earth.value  for s in ant_s]
     
@@ -246,11 +247,6 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     ant_locations = [EarthLocation.from_geodetic(lon=lon,  lat=lat, height=loc['alt']*u.m,  ellipsoid='WGS84') for lon, lat in ant_lon_lat]
     ant_positions = [[e.x.value, e.y.value, e.z.value] for e in ant_locations]
     position = da.asarray(ant_positions)
-    # position = da.asarray(ant_pos + 
-    #     np.tile(np.array([array_centroid.x.value,
-    #                       array_centroid.y.value,
-    #                       array_centroid.z.value]),
-    #             (ant_pos.shape[0], 1)))
     
     
     diameter = da.ones(num_ant) * 0.025
