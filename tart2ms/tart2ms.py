@@ -37,6 +37,7 @@ from tart.imaging.visibility import Visibility
 from tart.imaging import calibration
 
 from tart_tools import api_imaging
+from .fixvis import fixms
 
 LOGGER = logging.getLogger()
 
@@ -429,13 +430,10 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     }
     baselines = np.array(baselines)
     nbl = np.unique(baselines, axis=0).shape[0]
-    #LOGGER.info(f"baselines {baselines}")
-    bl_pos = np.array(ant_pos)[baselines]
-    uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T #/constants.L1_WAVELENGTH
-    # Use the - sign to get the same orientation as our tart projections.
-
-    uvw_array = np.array([uu_a, vv_a, ww_a]).T
-
+    
+    # will use casacore to generate these later
+    uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+    
     for ddid, (spw_id, pol_id) in enumerate(zip(spw_ids, pol_ids)):
         # Infer row, chan and correlation shape
         #LOGGER.info("ddid:{} ({}, {})".format(ddid, spw_id, pol_id))
@@ -634,7 +632,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 sources=[],
                 phase_center_policy=phase_center_policy,
                 override_telescope_name=override_telescope_name)
-
+    fixms(ms_name)
 
 def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telescope_name):
     LOGGER.info(f"Dumping phase center per {phase_center_policy}")
@@ -663,3 +661,4 @@ def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telesco
               vis_array = vis_array, baselines=baselines, timestamps=[timestamp],
               pol_feeds=pol_feeds, sources=src_list, phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name)
+    fixms(ms_name)
