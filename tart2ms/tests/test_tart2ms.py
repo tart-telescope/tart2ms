@@ -12,6 +12,7 @@ import logging
 import numpy as np
 from tart.operation import settings
 from tart_tools import api_imaging
+from tart.util import constants
 
 from tart2ms import ms_from_json, ms_from_hdf5
 import disko
@@ -70,12 +71,11 @@ class TestTart2MS(unittest.TestCase):
         cal_vis, timestamp = api_imaging.vis_calibrated(self.json_data['data'][0][0],
                                                         config, gains, phase_offsets, [])
         c = cal_vis.get_config()
-        ant_p = np.asarray(c.get_antenna_positions())
 
         # We need to get the vis array to be correct for the full set of u,v,w points (baselines), 
         # including the -u,-v, -w points.
 
-        baselines, u_arr2, v_arr2, w_arr2 = disko.get_all_uvw(ant_p)
+        u_arr2, v_arr2, w_arr2 = cal_vis.get_all_uvw() 
         
         self.assertAlmostEqual(np.max(u_arr, axis=0), np.max(u_arr2, axis=0), 6)
         
