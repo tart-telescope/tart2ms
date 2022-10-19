@@ -9,6 +9,9 @@ MS=test.ms
 develop:
 	pip3 install -e .
 
+test:
+	pytest-3
+	
 lint:
 	pylint --extension-pkg-whitelist=numpy --ignored-modules=numpy,tart_tools,dask,dask.array --extension-pkg-whitelist=astropy --extension-pkg-whitelist=dask tart2ms
 
@@ -22,7 +25,7 @@ h5:
 # 	wsclean -name test -pol RR -size 1280 1280 -scale 0.0275 -niter 0 ${MS}
 
 JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
-test:
+testms:
 	rm -rf ${MS}
 	tart2ms --json ${JSON} --ms ${MS} --override_telescope_name "KAT-7"
 
