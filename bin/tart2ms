@@ -18,7 +18,7 @@ from tart2ms import ms_from_json, ms_from_hdf5
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--json', required=False, default=None, help="Snapshot observation  JSON file (visiblities, positions and more).")
+    parser.add_argument('--json', required=False, default=None, nargs="*", help="Snapshot observation JSON file (visiblities, positions and more).")
     parser.add_argument('--hdf', required=False, default=None, nargs="*", help="Visibility hdf5 file (One minutes worth of visibility data).")
     parser.add_argument('--ms', required=False, default='tart.ms', help="Output MS table name.")
     parser.add_argument('--api', required=False, default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
@@ -50,13 +50,9 @@ if __name__ == "__main__":
                 raise RuntimeError("Measurement set path '{}' exists and is not a directory. Refusing to clobber!".format(ARGS.ms))
 
     if ARGS.json:
-        print("Getting Data from file: {}".format(ARGS.json))
-        # Load data from a JSON file
-        with open(ARGS.json, 'r') as json_file:
-            json_data = json.load(json_file)
-            
+        print("Getting Data from file: {}".format(ARGS.json))    
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
+        ms_from_json(ARGS.ms, ARGS.json, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
             
     elif ARGS.hdf:
@@ -87,5 +83,5 @@ if __name__ == "__main__":
                     }
     
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, json_data, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
+        ms_from_json(ARGS.ms, None, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name, json_data=json_data)
         print("Measurement set writing complete.")
