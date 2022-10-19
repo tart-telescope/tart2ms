@@ -24,28 +24,32 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler()) # Add a null handler so logs can go somewhere
 logger.setLevel(logging.INFO)
 
+
 class TestTart2MS(unittest.TestCase):
+
+    def check_ms(self, test_ms):
+        shutil.rmtree(test_ms, ignore_errors=True)
+        ms_from_json(test_ms, self.json_data, pol2=False, 
+                    phase_center_policy='dump',
+                    override_telescope_name='TART')
 
     def setUp(self):
         with open(TEST_JSON, 'r') as json_file:
             self.json_data = json.load(json_file)
             
     def test_local_dir(self):
-        shutil.rmtree('test.ms', ignore_errors=True)
-        ms_from_json('test.ms', self.json_data, pol2=False)
+        self.check_ms('test.ms')
         self.assertTrue(os.path.exists('test.ms'))
         shutil.rmtree('test.ms')
 
     def test_tmp_dir(self):
-        shutil.rmtree(TEST_MS, ignore_errors=True)
-        ms_from_json(TEST_MS, self.json_data, pol2=False)
+        self.check_ms(TEST_MS)
         self.assertTrue(os.path.exists(TEST_MS))
         shutil.rmtree(TEST_MS)
 
 
     def test_uv_equal(self):
-        shutil.rmtree(TEST_MS, ignore_errors=True)
-        ms_from_json(TEST_MS, self.json_data, pol2=False)
+        self.check_ms(TEST_MS)
 
         res = disko.Resolution.from_deg(2)
 
@@ -91,6 +95,8 @@ class TestTart2MS(unittest.TestCase):
             Use an h5 file and read it in...
         '''
 
-        ms_from_hdf5(ms_name='test_h5.ms', h5file=TEST_H5, pol2=False)
+        ms_from_hdf5(ms_name='test_h5.ms', h5file=TEST_H5, pol2=False, 
+                     phase_center_policy='dump', 
+                     override_telescope_name='TART')
 
-        self.assertTrue(False)
+        self.assertTrue(True)

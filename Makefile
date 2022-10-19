@@ -3,7 +3,7 @@
 #     make develop
 # in this directory.
 
-WSCLEAN=export OPENBLAS_NUM_THREADS=1; wsclean -name test -pol RR -size 1000 1000 -scale 0.175 -niter 1000
+WSCLEAN=export OPENBLAS_NUM_THREADS=1; wsclean -weight briggs 0 -name test -pol RR -size 1000 1000 -scale 0.175 -niter 1000 -gain 0.1 -mgain 0.05 -padding 1.5 -auto-mask 7
 MS=test.ms
 
 develop:
