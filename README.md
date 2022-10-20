@@ -35,8 +35,8 @@ JSON databases may be exported from HDF5 archives using
    
     tart_vis2json --vis ../NZ_2022_10_19/*.hdf 
 
-Currently each such exported JSON database will contain a single timestamp (thus multiple JSON databases)
-may result from a single HDF5 archive.
+Currently each such exported JSON database will contain a single timestamp (thus multiple JSON databases
+may result from a single HDF5 archive).
 
 Your telescope name may not be in the JPL list of recognized observatories which at present
 raises an error in casacore and hence some casa tasks like listobs or plotants, even though the
