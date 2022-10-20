@@ -43,7 +43,7 @@ raises an error in casacore and hence some casa tasks like listobs or plotants, 
 antenna table contains valid ITRF coordinates for the antennae. We recommend that if problems are
 encountered the telescope name is changed to an existing observatory like kat-7 or MeerKAT.
 
-    tart2ms --json ../tart_data/NZ_2022_10_19_json/*.json -c --override_telescope_name 'kat-7'
+    tart2ms --json ../tart_data/NZ_2022_10_19_json/*.json -c --telescope_name 'kat-7'
 
 Standard CASA tasks may be executed with the CASA memo 229-compliant (MSv2.0) databases written by tart2ms.
 These may include (tested):

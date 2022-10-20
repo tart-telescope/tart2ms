@@ -34,7 +34,7 @@ if __name__ == "__main__":
                              "instrument resolution (ie. should only be used for very short snapshot observations). Will by default write a field per "
                              "integration interval in the direction of the instantaneous zenithal direction. If you want a single tracking field use "
                              "one of the rephasing options.")
-    parser.add_argument('--override_telescope_name', required=False, default="TART",
+    parser.add_argument('--telescope_name', dest="override_telescope_name", required=False, default="TART",
                         help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
     ARGS = parser.parse_args()
     logger = logging.getLogger()
@@ -54,7 +54,9 @@ if __name__ == "__main__":
                 shutil.rmtree(ARGS.ms)
             else:
                 raise RuntimeError("Measurement set path '{}' exists and is not a directory. Refusing to clobber!".format(ARGS.ms))
-
+    if ARGS.json and ARGS.hdf:
+        raise RuntimeError("At the moment can only concatenate from JSON or HDF files, not a combination of the two")
+        
     if ARGS.json:
         print("Getting Data from file: {}".format(ARGS.json))    
         print("Writing measurement set '{}'...".format(ARGS.ms))
