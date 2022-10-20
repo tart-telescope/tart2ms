@@ -189,11 +189,16 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         loc = info
 
     lat, lon, height = loc["lat"], loc["lon"], loc["alt"]
-    LOGGER.info(f"pos {lat, lon, height}")
+    LOGGER.info("Telescope position (WGS84):")
+    LOGGER.info(f"\tLat {lat}")
+    LOGGER.info(f"\tLon {lon}")
+    LOGGER.info(f"\tAlt {height}")
 
     array_centroid = ac.EarthLocation.from_geodetic(lat=lat, lon=lon, height=height)
     epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
-    LOGGER.info(f"Time {epoch_s}")
+    LOGGER.debug(f"Time {epoch_s}")
+    LOGGER.info(f"Min time: {np.min(epoch_s)}")
+    LOGGER.info(f"Max time: {np.max(epoch_s)}")
 
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
@@ -219,7 +224,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     corr_types = [[MS_STOKES_ENUMS[p_f] for p_f in pol_feeds]]
 
     LOGGER.info("Pol Feeds {}".format(pol_feeds))
-    LOGGER.info("Correlation Types {}".format(corr_types))
+    LOGGER.debug("Correlation Types {}".format(corr_types))
     num_freq_channels = [1]
 
     ant_table = MSTable(ms_table_name, 'ANTENNA')
@@ -278,8 +283,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     pol_types = pol_feeds
     pol_responses = [POL_RESPONSES[ct] for ct in pol_feeds]
 
-    LOGGER.info("Pol Types {}".format(pol_types))
-    LOGGER.info("Pol Responses {}".format(pol_responses))
+    LOGGER.debug("Pol Types {}".format(pol_types))
+    LOGGER.debug("Pol Responses {}".format(pol_responses))
 
     antenna_ids = da.asarray(range(num_ant))
     feed_ids = da.zeros(num_ant)
@@ -389,16 +394,16 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         corr_prod = [[i, i] for i in range(len(corr_type))]
 
         corr_prod = np.array(corr_prod)
-        LOGGER.info("Corr Prod {}".format(corr_prod))
-        LOGGER.info("Corr Type {}".format(corr_type))
+        LOGGER.debug("Corr Prod {}".format(corr_prod))
+        LOGGER.debug("Corr Type {}".format(corr_type))
 
         dask_num_corr = da.full((1,), len(corr_type), dtype=np.int32)
-        LOGGER.info("NUM_CORR {}".format(dask_num_corr))
+        LOGGER.debug("NUM_CORR {}".format(dask_num_corr))
         dask_corr_type = da.from_array(corr_type,
                                        chunks=len(corr_type))[None, :]
         dask_corr_product = da.asarray(corr_prod)[None, :]
-        LOGGER.info("Dask Corr Prod {}".format(dask_corr_product.shape))
-        LOGGER.info("Dask Corr Type {}".format(dask_corr_type.shape))
+        LOGGER.debug("Dask Corr Prod {}".format(dask_corr_product.shape))
+        LOGGER.debug("Dask Corr Type {}".format(dask_corr_type.shape))
         dataset = Dataset({
             "NUM_CORR": (("row",), dask_num_corr),
             "CORR_TYPE": (("row", "corr"), dask_corr_type),
@@ -477,7 +482,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
         # Create some dask vis data
         dims = ("row", "chan", "corr")
-        LOGGER.info(f"Data size {row} {chan} {corr}")
+        LOGGER.debug(f"Data size {row} {chan} {corr}")
+        LOGGER.info(f"Data column size {row * chan * corr * 8 / 1024.0**2} MiB")
 
         #np_data = vis_array.reshape((row, chan, corr))
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
@@ -584,7 +590,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
                                      frame='icrs')
             new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:.0f}h{new_phase_dir.ra.hms[1]:.0f}m{new_phase_dir.ra.hms[2]:.2f}s "\
                                  f"{new_phase_dir.dec.dms[0]:.0f}d{abs(new_phase_dir.dec.dms[1]):.0f}m{abs(new_phase_dir.dec.dms[2]):.2f}s"
-            LOGGER.info(f"Rephase to {new_phase_dir_repr}")
+            LOGGER.info("<Done>")
+            LOGGER.info(f"Per user request: Rephase all data to {new_phase_dir_repr}")
             rephased_data = da.empty_like(dask_data)
             
             rephased_data = \
@@ -653,6 +660,13 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     else:
         raise ValueError('uvw_generator expects either mode "telescope" or "casacore"')
 
+def __print_infodict_keys(dico_info, keys, just=25):
+    LOGGER.info("Observatory parameters:")
+    for k in keys:
+        val = dico_info.get(k, "Information Unavailable")
+        reprk = str(k).ljust(just, " ")
+        LOGGER.info(f"\t{reprk}: {val}")
+
 def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore"):
     if pol2:
         pol_feeds = [ 'RR', 'LL' ]
@@ -665,18 +679,25 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
     all_baselines = []
     ant_pos_orig = None
     orig_dico_info = None
+    LOGGER.info("Will process HDF5 file: ")
+    for h5 in h5file:
+        LOGGER.info(f"\t '{h5}'")
 
+    p = progress("Processing HDF database", max=len(h5file))
     for ih5, h5 in enumerate(h5file):
         with h5py.File(h5, "r") as h5f:
-            LOGGER.info(f"Processing h5 database {ih5+1}/{len(h5file)}: '{h5}'")
             config_string = np.string_(h5f['config'][0]).decode('UTF-8')
             if ih5 == 0:
-                LOGGER.info("config_string = {}".format(config_string))
+                LOGGER.debug("config_string = {}".format(config_string))
 
             config_json = json.loads(config_string)
             config_json['operating_frequency'] = config_json['frequency']
             if ih5 == 0:
-                LOGGER.info(f"config_json = {json.dumps(config_json, indent=4, sort_keys=True)}")
+                LOGGER.debug(f"config_json = {json.dumps(config_json, indent=4, sort_keys=True)}")
+                __print_infodict_keys(config_json, 
+                                      ["L0_frequency","bandwidth","baseband_frequency",
+                                       "operating_frequency","name","num_antenna",
+                                       "sampling_frequency"])
             config = settings.from_json(config_string)
             hdf_baselines = h5f['baselines'][:]
             hdf_phase_elaz = h5f['phase_elaz'][:]
@@ -738,7 +759,9 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 for bl in baselines:
                     all_baselines.append(bl)
                 all_times.append(ts)
-
+        p.next()
+    
+    LOGGER.info("<Done>")
     # finally create concat ms
     all_vis = np.array(all_vis).flatten()
     all_baselines = np.array(all_baselines)
@@ -761,7 +784,9 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         if isinstance(json_filename, str):
             json_filename = [json_filename]
         json_data = []
+        LOGGER.info("Will process JSON file: ")
         for jfi in json_filename:
+            LOGGER.info(f"\t '{jfi}'")    
             with open(jfi, 'r') as json_file:
                 json_data.append(json.load(json_file))
     elif json_filename is None and json_data is not None:
@@ -775,9 +800,9 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
     all_baselines = []
     ant_pos_orig = None
     orig_dico_info = None
+    p = progress("Processing JSON database", max=len(json_data))
     for ijdi, jdi in enumerate(json_data):
-        LOGGER.info(f"Processing JSON database {ijdi+1}/{len(json_data)}")
-        info = jdi['info']
+        info = jdi['info']    
         ant_pos = jdi['ant_pos']
         config = settings.from_api_json(info['info'], ant_pos)
         gains = jdi['gains']['gain']
@@ -831,7 +856,12 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         for bl in baselines:
             all_baselines.append(bl)
         all_times.append(timestamp)
-    
+        p.next()
+    LOGGER.info("<Done>")
+    __print_infodict_keys(orig_dico_info, 
+                          ["L0_frequency","bandwidth","baseband_frequency",
+                           "operating_frequency","name","num_antenna",
+                           "sampling_frequency"])
     # finally concat into a single measurement set
     all_vis = np.array(all_vis).flatten()
     all_baselines = np.array(all_baselines)
