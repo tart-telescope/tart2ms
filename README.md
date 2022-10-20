@@ -20,6 +20,39 @@ To convert a previously downloads JSON file to a measurement set (MS):
 
     tart2ms --json data.json --ms data.ms
 
+JSON-based datasets currently may only contain a single timestamp. This limits their usefulness
+when it comes to more general imaging. It is possible to make a concatenated database from multiple
+single-dump json databases, e.g.
+    
+    tart2ms --json ../tart_data/NZ_2022_10_19_json/*.json
+
+HDF5 format archive files may contain multiple timestamps and may also be concatenated into
+longer observations as is the case for JSON archive files.
+
+    tart2ms --hdf ../tart_data/NZ_2022_10_19/*.hdf
+
+JSON databases may be exported from HDF5 archives using
+   
+    tart_vis2json --vis ../NZ_2022_10_19/*.hdf 
+
+Currently each such exported JSON database will contain a single timestamp (thus multiple JSON databases
+may result from a single HDF5 archive).
+
+Your telescope name may not be in the JPL list of recognized observatories which at present
+raises an error in casacore and hence some casa tasks like listobs or plotants, even though the
+antenna table contains valid ITRF coordinates for the antennae. We recommend that if problems are
+encountered the telescope name is changed to an existing observatory like kat-7 or MeerKAT.
+
+    tart2ms --json ../tart_data/NZ_2022_10_19_json/*.json -c --override_telescope_name 'kat-7'
+
+Standard CASA tasks may be executed with the CASA memo 229-compliant (MSv2.0) databases written by tart2ms.
+These may include (tested):
+  - listobs
+  - plotms
+  - fixvis
+  - plotants
+  - clean
+
 To synthesize (using wsclean) the image from the measurement set:
 
     wsclean -name test -size 1280 1280 -scale 0.0275 -niter 0 data.ms

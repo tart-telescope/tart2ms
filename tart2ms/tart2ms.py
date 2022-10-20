@@ -474,8 +474,10 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         uvw_data = da.from_array(np_uvw)
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks['row'], dtype=np.int32)
-        assert dask_data.shape[0] % len(epoch_s) == 0, "Expected nrow to be divisible by ntime"
-        assert dask_data.shape[0] == len(epoch_s) * nbl
+        if dask_data.shape[0] % len(epoch_s) != 0:
+            raise RuntimeError("Expected nrow to be integral multiple of number of time slots")
+        if dask_data.shape[0] != len(epoch_s) * nbl:
+            raise RuntimeError("Some baselines are missing in the data array. Not supported")
         epoch_s_arr = np.array(epoch_s)
         intervals = np.zeros(len(epoch_s_arr), dtype=np.float64)
         # going to assume the correlator integration interval is constant
@@ -588,20 +590,23 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
             if orig_dico_info is None:
                 orig_dico_info = config_json
             config_same = True
-            print(config_json)
+            
             for check_key in ["L0_frequency", "bandwidth", "baseband_frequency",
                               "num_antenna", "operating_frequency", "sampling_frequency",
                               "lat", "lon", "alt", "orientation", "axes"]:
                 if check_key not in config_json or check_key not in orig_dico_info:
                     raise RuntimeError(f"Key {check_key} missing from database!")
                 if isinstance(orig_dico_info[check_key], float):
-                    config_same = np.isclose(orig_dico_info[check_key],
+                    config_same = config_same and \
+                                  np.isclose(orig_dico_info[check_key],
                                              config_json[check_key])
-                elif isinstance(orig_dico_info, list):
-                    config_same = all(orig_dico_info, config_json)
+                elif isinstance(orig_dico_info[check_key], list):
+                    config_same = config_same and \
+                                  np.all(np.array(orig_dico_info[check_key]) == np.array(config_json[check_key]))
                 else:
-                    config_same = orig_dico_info[check_key] == \
-                                  config_json[check_key]
+                    config_same = config_same and \
+                                  orig_dico_info[check_key] == \
+                                    config_json[check_key]
             
             if not config_same:
                 raise RuntimeError("The databases you are trying to concatenate have different configurations. "
@@ -655,32 +660,97 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
     else:
         raise ValueError('uvw_generator expects either mode "telescope" or "casacore"')
 
-def ms_from_json(ms_name, json_data, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore"):
+def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name, 
+                 uvw_generator="casacore", json_data=None):
     LOGGER.info(f"Dumping phase center per {phase_center_policy}")
-    info = json_data['info']
-    ant_pos = json_data['ant_pos']
-    config = settings.from_api_json(info['info'], ant_pos)
-    gains = json_data['gains']['gain']
-    phases = json_data['gains']['phase_offset']
-
-    # Note, these do not contain the conjugate pairs, only v[i,j] (and not v[j,i])
-    for d in json_data['data']: # TODO deal with multiple observations in the JSON file later.
-        vis_json, source_json = d
-        cal_vis, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
-        src_list = source_json
-
-    if pol2:
-        pol_feeds = [ 'RR', 'LL' ]
+    # Load data from a JSON file
+    if json_filename is not None and json_data is None:
+        if isinstance(json_filename, str):
+            json_filename = [json_filename]
+        json_data = []
+        for jfi in json_filename:
+            with open(jfi, 'r') as json_file:
+                json_data.append(json.load(json_file))
+    elif json_filename is None and json_data is not None:
+        if not isinstance(json_data, list):
+            json_data = [json_data]
     else:
-        pol_feeds = [ 'RR' ]
+        raise ValueError("Either json_filename or json_data arguments should be given")
+    
+    all_times = []
+    all_vis = []
+    all_baselines = []
+    ant_pos_orig = None
+    orig_dico_info = None
+    for ijdi, jdi in enumerate(json_data):
+        LOGGER.info(f"Processing JSON database {ijdi+1}/{len(json_data)}")
+        info = jdi['info']
+        ant_pos = jdi['ant_pos']
+        config = settings.from_api_json(info['info'], ant_pos)
+        gains = jdi['gains']['gain']
+        phases = jdi['gains']['phase_offset']
+        if ant_pos_orig is None:
+            ant_pos_orig = ant_pos.copy()
+        if not np.isclose(ant_pos_orig, ant_pos).all():
+            raise RuntimeError("The databases you are trying to concatenate have different antenna layouts. "
+                                "This is not yet supported. You could try running CASA virtualconcat to "
+                                "concatenate such heterogeneous databases")
+        if orig_dico_info is None:
+            orig_dico_info = info["info"]
 
-    vis_data, baselines = cal_vis.get_all_visibility() 
-    vis_array = np.array(vis_data, dtype=np.complex64)
+        config_same = True
+        for check_key in ["L0_frequency", "bandwidth", "baseband_frequency",
+                          "num_antenna", "operating_frequency", "sampling_frequency",
+                          "lat", "lon", "alt", "orientation", "axes"]:
+            if check_key not in info["info"] or check_key not in orig_dico_info:
+                raise RuntimeError(f"Key {check_key} missing from database!")
+            if isinstance(orig_dico_info[check_key], float):
+                config_same = config_same and \
+                              np.isclose(orig_dico_info[check_key],
+                                         info["info"][check_key])
+            elif isinstance(orig_dico_info[check_key], list):
+                config_same = config_same and \
+                              np.all(np.array(orig_dico_info[check_key]) == np.array(info["info"][check_key]))
+            else:
+                config_same = config_same and \
+                              orig_dico_info[check_key] == \
+                                  info["info"][check_key]
+        
+        if not config_same:
+            raise RuntimeError("The databases you are trying to concatenate have different configurations. "
+                                "This is not yet supported. You could try running CASA virtualconcat to "
+                                "concatenate such heterogeneous databases")
 
-    ms_create(ms_table_name=ms_name, info = info['info'],
-              ant_pos = ant_pos,
-              vis_array = vis_array, baselines=baselines, timestamps=[timestamp],
-              pol_feeds=pol_feeds, sources=src_list, phase_center_policy=phase_center_policy,
+        # Note, these do not contain the conjugate pairs, only v[i,j] (and not v[j,i])
+        for d in jdi['data']: # TODO deal with multiple observations in the JSON file later.
+            vis_json, source_json = d
+            cal_vis, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
+            src_list = source_json
+
+        if pol2:
+            pol_feeds = [ 'RR', 'LL' ]
+        else:
+            pol_feeds = [ 'RR' ]
+
+        vis_data, baselines = cal_vis.get_all_visibility() 
+        vis_array = np.array(vis_data, dtype=np.complex64)
+        all_vis.append(vis_array)
+        for bl in baselines:
+            all_baselines.append(bl)
+        all_times.append(timestamp)
+    
+    # finally concat into a single measurement set
+    all_vis = np.array(all_vis).flatten()
+    all_baselines = np.array(all_baselines)
+    ms_create(ms_table_name=ms_name,
+              info=orig_dico_info,
+              ant_pos=ant_pos,
+              vis_array=all_vis,
+              baselines=all_baselines,
+              timestamps=all_times,
+              pol_feeds=pol_feeds,
+              sources=src_list,
+              phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name, uvw_generator=uvw_generator)
     if uvw_generator == 'telescope_snapshot':
         pass
