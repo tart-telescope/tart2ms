@@ -8,6 +8,7 @@ from pyrap.tables import table as tbl
 import numpy as np
 from pyrap.measures import measures
 from pyrap.quanta import quantity
+from pyrap import quanta
 
 import logging
 from progress.bar import FillingSquaresBar as bar
@@ -73,7 +74,7 @@ def baseline_index(a1, a2, no_antennae):
         np.abs(a1 - a2)
 
 
-def dense2sparse_uvw(a1, a2, time, ddid, padded_uvw):
+def dense2sparse_uvw(a1, a2, time, ddid, padded_uvw, ack=True):
     """
     Copy a dense uvw matrix onto a sparse uvw matrix
         a1: sparse antenna 1 index
@@ -94,9 +95,11 @@ def dense2sparse_uvw(a1, a2, time, ddid, padded_uvw):
     unique_time = np.unique(time)
     new_uvw = np.zeros((a1.size, 3), dtype=padded_uvw.dtype)
     outbl = baseline_index(a1, a2, na)
-    p = progress('Copying UVW to dataset', max=a1.size)
+    if ack:
+        p = progress('Copying UVW to dataset', max=a1.size)
     for outrow in range(a1.size):
-        p.next()
+        if ack:
+            p.next()
         lookupt = np.argwhere(unique_time == time[outrow])
         # note: uvw same for all ddid (in m)
         new_uvw[outrow][:] = padded_uvw[lookupt * nbl + outbl[outrow], :]
@@ -108,7 +111,7 @@ def synthesize_uvw(station_ECEF, time, a1, a2,
                    phase_ref,
                    stopctr_units=["rad", "rad"], stopctr_epoch="j2000",
                    time_TZ="UTC", time_unit="s",
-                   posframe="ITRF", posunits=["m", "m", "m"]):
+                   posframe="ITRF", posunits=["m", "m", "m"], ack=True):
     """
     Synthesizes new UVW coordinates based on time according to
     NRAO CASA convention (same as in fixvis)
@@ -164,9 +167,11 @@ def synthesize_uvw(station_ECEF, time, a1, a2,
     dm.do_frame(obs)
     dm.do_frame(refdir)
     dm.do_frame(epoch)
-    p = progress('Calculating UVW', max=unique_time.size)
+    if ack:
+        p = progress('Calculating UVW', max=unique_time.size)
     for ti, t in enumerate(unique_time):
-        p.next()
+        if ack:
+            p.next()
         epoch = dm.epoch("UT1", quantity(t, "s"))
         dm.do_frame(epoch)
 
@@ -194,8 +199,60 @@ def synthesize_uvw(station_ECEF, time, a1, a2,
     return dict(zip(["UVW", "TIME_CENTROID", "ANTENNA1", "ANTENNA2"],
                     [padded_uvw, padded_time, padded_a1, padded_a2]))
 
+def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1):
+    """
+        Rephasor operator
+        -- rephases a field to a new phase centre
+        freq - in Hz
+        pos - tupple containing degree coordinates for RA and Dec for the epoch under consideration
+        refdir - array of tuples with original field phase centres in RA and dec at the same epoch as pos (degrees), one per field
+        phasesign - should be -1 for the NRAO baseline conventions
+    """
+    uniq_fields = np.unique(field_ids)
+    if refdir.shape[0] != uniq_fields.size:
+        raise ValueError("Must have as many ref positions as unique fields")
+    if refdir.shape[1] != 2:
+        raise ValueError("ref must be shape nfield x 2")
+    if pos.size != 2 and pos.shape[0] != 2:
+        raise ValueError("pos must be shape 2")
+    for fid in uniq_fields:
+        selfid = field_ids == fid
+        nrowsel = np.sum(selfid)
+        cos = np.cos
+        sin = np.sin
+        sqrt = np.sqrt
+        ra, dec = np.deg2rad(pos)
+        ra0, dec0 = np.deg2rad(refdir[fid])        
+        d_ra = ra - ra0
+        d_dec = dec
+        d_decp = dec0
+        c_d_dec = cos(d_dec)
+        s_d_dec = sin(d_dec)
+        s_d_ra = sin(d_ra)
+        c_d_ra = cos(d_ra)
+        c_d_decp = cos(d_decp)
+        s_d_decp = sin(d_decp)
+        ll = c_d_dec * s_d_ra
+        mm = (s_d_dec * c_d_decp - c_d_dec * s_d_decp * c_d_ra)
+        nn = -(1 - sqrt(1 - ll * ll - mm * mm))
+    
+        wl = np.tile((quanta.constants["c"].get_value() / freq), (nrowsel, 1))
+        uvw_freq = np.zeros((nrowsel, freq.size, 3))
+        uvw_freq[:,:,0] = uvw[selfid,0].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:,:,1] = uvw[selfid,1].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:,:,2] = uvw[selfid,2].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+                
+        x = np.exp(phasesign * 2.0j * np.pi * (uvw_freq[:,:,0] * ll +
+                                               uvw_freq[:,:,1] * mm +
+                                               uvw_freq[:,:,2] * nn))
+        ncorr = vis.shape[2]
+        vis[selfid, :, :] *= x.repeat(ncorr).reshape(nrowsel, freq.size, ncorr)
+    
+    return vis
+    
 
-def fixms(msname):
+
+def fixms(msname, ack=True):
     """
         Runs an operation similar to the CASA fixvis task
         Recomputes UVW coordinates with casacore for the predicted
@@ -251,12 +308,14 @@ def fixms(msname):
                                     time_unit=time_unit,
                                     stopctr_epoch=stopctr_epoch,
                                     posframe=posframe,
-                                    posunits=posunits)
+                                    posunits=posunits,
+                                    ack=ack)
         new_uvw[fsel] = dense2sparse_uvw(a1=a1[fsel],
                                          a2=a2[fsel],
                                          time=time[fsel],
                                          ddid=ddid[fsel],
-                                         padded_uvw=padded_uvw["UVW"])
+                                         padded_uvw=padded_uvw["UVW"],
+                                         ack=ack)
         logger.info("\t {} / {} fields completed".format(fi + 1, len(fnames)))
 
     logger.info("Writing computed UVW coordinates to output dataset")

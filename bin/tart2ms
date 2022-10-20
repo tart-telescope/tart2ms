@@ -26,8 +26,14 @@ if __name__ == "__main__":
     parser.add_argument('--vis', required=False, default=None, help="Use a local JSON file containing the visibilities  for visibility data")
     parser.add_argument('--pol2', action="store_true", help="Fake a second polarization. Some pipelines choke if there is only one.")
     parser.add_argument('--clobber', '-c', action="store_true", help="Overwrite output ms if exists")
-    parser.add_argument('--phase_center_policy', required=False, default="dump", choices=["dump","observation"],
-                        help="Write out a phase center per {dump,observation}")
+    parser.add_argument('--phase_center_policy', required=False, default='instantaneous-zenith', 
+                        choices=['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint','rephase-SCP','rephase-NCP'],
+                        help="Write out a phase center per ['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint','rephase-SCP','rephase-NCP'] "
+                             "Warning: 'no-rephase-obs-midpoint' "
+                             "must be used with extreme caution and will only give valid phase tracking coordinates if the sky moves a small fraction of the "
+                             "instrument resolution (ie. should only be used for very short snapshot observations). Will by default write a field per "
+                             "integration interval in the direction of the instantaneous zenithal direction. If you want a single tracking field use "
+                             "one of the rephasing options.")
     parser.add_argument('--override_telescope_name', required=False, default="TART",
                         help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
     ARGS = parser.parse_args()
