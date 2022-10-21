@@ -314,30 +314,32 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     assert direction.ndim == 3
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
+    def __twelveball(direction):
+        """ standardized Jhhmmss-ddmmss name """
+        sc_dir = SkyCoord(direction[0]*u.rad, direction[1]*u.rad,
+                            frame='icrs')
+        sign = "-" if sc_dir.dec.dms[0] < 0 else "+"
+        sc_dir_repr = f"J{sc_dir.ra.hms[0]:02.0f}{sc_dir.ra.hms[1]:02.0f}{sc_dir.ra.hms[2]:02.0f}"\
+                      f"{sign}"\
+                      f"{abs(sc_dir.dec.dms[0]):02.0f}{abs(sc_dir.dec.dms[1]):02.0f}{abs(sc_dir.dec.dms[2]):02.0f}"
+        return sc_dir_repr
     if phase_center_policy == "instantaneous-zenith":
-        field_name = da.asarray(np.array(list(map(lambda sn: f'zenith_scan_{sn+1}', range(direction.shape[2]))),
-                                     dtype=object),
-                                chunks=1)
+        pass
     elif phase_center_policy == "no-rephase-obs-midpoint" or \
          phase_center_policy == "rephase-obs-midpoint":
         direction = direction[:,:,direction.shape[2]//2].reshape(1,2,1)
-        field_name = da.asarray(np.array(list(map(lambda sn: f'obs_midpoint', range(direction.shape[2]))),
-                                     dtype=object),
-                                chunks=1)
     elif phase_center_policy == "rephase-SCP":
         direction = np.array([0, np.deg2rad(-90)]).reshape(1,2,1)
-        field_name = da.asarray(np.array(list(map(lambda sn: f'SCP', range(direction.shape[2]))),
-                                     dtype=object),
-                                chunks=1)
     elif phase_center_policy == "rephase-NCP":
         direction = np.array([0, np.deg2rad(90)]).reshape(1,2,1)
-        field_name = da.asarray(np.array(list(map(lambda sn: f'NCP', range(direction.shape[2]))),
-                                     dtype=object),
-                                chunks=1)
     else:
         raise ValueError(f"phase_center_policy must be one of "
                          f"['instantaneous-zenith','rephase-obs-midpoint','rephase-SCP','rephase-NCP','no-rephase-obs-midpoint'] "
                          f"got {phase_center_policy}")
+    field_name = da.asarray(np.array(list(map(__twelveball,
+                                              direction.reshape(2, direction.shape[2]).T)),
+                                     dtype=object),
+                            chunks=1)
     field_direction = da.asarray(
             direction.T.reshape(direction.shape[2],
                                 1, 2).copy(), chunks=(1, None, None)) # nrow x npoly x 2
@@ -608,8 +610,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
                 p.next()
             new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
                                      frame='icrs')
-            new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:.0f}h{new_phase_dir.ra.hms[1]:.0f}m{new_phase_dir.ra.hms[2]:.2f}s "\
-                                 f"{new_phase_dir.dec.dms[0]:.0f}d{abs(new_phase_dir.dec.dms[1]):.0f}m{abs(new_phase_dir.dec.dms[2]):.2f}s"
+            new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
+                                 f"{new_phase_dir.dec.dms[0]:02.0f}d{abs(new_phase_dir.dec.dms[1]):02.0f}m{abs(new_phase_dir.dec.dms[2]):05.2f}s"
             LOGGER.info("<Done>")
             LOGGER.info(f"Per user request: Rephase all data to {new_phase_dir_repr}")
             rephased_data = da.empty_like(dask_data)
