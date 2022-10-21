@@ -20,6 +20,7 @@ import numpy as np
 from itertools import product
 
 from casacore.measures import measures
+from casacore.quanta import quantity
 
 from astropy import coordinates as ac
 
@@ -29,7 +30,8 @@ import astropy.units as u
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz, Angle
 from astropy.utils import iers
-from astropy.constants import R_earth
+from astropy.constants import R_earth, c as lightspeed
+
 
 from tart.util import constants
 from tart.operation import settings
@@ -142,12 +144,8 @@ def timestamp_to_ms_epoch(t_stamp):
       The epoch time ``t`` in seconds suitable for fields in
       measurement sets.
     '''
-    dm = measures()
-    epoch = dm.epoch(rf='utc', v0=t_stamp.isoformat())
-    epoch_d = epoch['m0']['value']
-    epoch_s = epoch_d*24*60*60.0
-    return epoch_s
-
+    return quantity(t_stamp.isoformat()).get_value("s")
+    
 
 def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources, phase_center_policy, override_telescope_name,
               uvw_generator='casacore'):
@@ -194,11 +192,10 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     LOGGER.info(f"\tLon {lon}")
     LOGGER.info(f"\tAlt {height}")
 
-    array_centroid = ac.EarthLocation.from_geodetic(lat=lat, lon=lon, height=height)
     epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
     LOGGER.debug(f"Time {epoch_s}")
-    LOGGER.info(f"Min time: {np.min(epoch_s)}")
-    LOGGER.info(f"Max time: {np.max(epoch_s)}")
+    LOGGER.info(f"Min time: {np.min(timestamps)} -- {np.min(epoch_s)}")
+    LOGGER.info(f"Max time: {np.max(timestamps)} -- {np.max(epoch_s)}")
 
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
@@ -317,30 +314,32 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     assert direction.ndim == 3
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
+    def __twelveball(direction):
+        """ standardized Jhhmmss-ddmmss name """
+        sc_dir = SkyCoord(direction[0]*u.rad, direction[1]*u.rad,
+                            frame='icrs')
+        sign = "-" if sc_dir.dec.dms[0] < 0 else "+"
+        sc_dir_repr = f"J{sc_dir.ra.hms[0]:02.0f}{sc_dir.ra.hms[1]:02.0f}{sc_dir.ra.hms[2]:02.0f}"\
+                      f"{sign}"\
+                      f"{abs(sc_dir.dec.dms[0]):02.0f}{abs(sc_dir.dec.dms[1]):02.0f}{abs(sc_dir.dec.dms[2]):02.0f}"
+        return sc_dir_repr
     if phase_center_policy == "instantaneous-zenith":
-        field_name = da.asarray(np.array(list(map(lambda sn: f'zenith_scan_{sn+1}', range(direction.shape[2]))),
-                                     dtype=object),
-                                chunks=1)
+        pass
     elif phase_center_policy == "no-rephase-obs-midpoint" or \
          phase_center_policy == "rephase-obs-midpoint":
         direction = direction[:,:,direction.shape[2]//2].reshape(1,2,1)
-        field_name = da.asarray(np.array(list(map(lambda sn: f'obs_midpoint', range(direction.shape[2]))),
-                                     dtype=object),
-                                chunks=1)
     elif phase_center_policy == "rephase-SCP":
         direction = np.array([0, np.deg2rad(-90)]).reshape(1,2,1)
-        field_name = da.asarray(np.array(list(map(lambda sn: f'SCP', range(direction.shape[2]))),
-                                     dtype=object),
-                                chunks=1)
     elif phase_center_policy == "rephase-NCP":
         direction = np.array([0, np.deg2rad(90)]).reshape(1,2,1)
-        field_name = da.asarray(np.array(list(map(lambda sn: f'NCP', range(direction.shape[2]))),
-                                     dtype=object),
-                                chunks=1)
     else:
         raise ValueError(f"phase_center_policy must be one of "
                          f"['instantaneous-zenith','rephase-obs-midpoint','rephase-SCP','rephase-NCP','no-rephase-obs-midpoint'] "
                          f"got {phase_center_policy}")
+    field_name = da.asarray(np.array(list(map(__twelveball,
+                                              direction.reshape(2, direction.shape[2]).T)),
+                                     dtype=object),
+                            chunks=1)
     field_direction = da.asarray(
             direction.T.reshape(direction.shape[2],
                                 1, 2).copy(), chunks=(1, None, None)) # nrow x npoly x 2
@@ -457,6 +456,19 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     }
     baselines = np.array(baselines)
     nbl = np.unique(baselines, axis=0).shape[0]
+    baseline_lengths = (da.sqrt((antenna_itrf_pos[baselines[:, 0]] - 
+                                 antenna_itrf_pos[baselines[:, 1]])**2)).compute()
+    max_baseline = np.max(baseline_lengths)
+    min_baseline = np.min(baseline_lengths)
+    max_freq = np.max(spw_chan_freqs)
+    min_wl = lightspeed.value / max_freq
+    # approx resolution given by first order bessel
+    # assuming array is a flat pilbox
+    reyleigh_crit = np.rad2deg(1.220 * min_wl / max_baseline)
+    LOGGER.info("Baseline lengths:")
+    LOGGER.info(f"\tMinimum: {min_baseline:.4f} m")
+    LOGGER.info(f"\tMaximum: {max_baseline:.4f} m --- {max_baseline/min_wl:.4f} wavelengths")
+    LOGGER.info(f"Appoximate unweighted instrument resolution: {reyleigh_crit * 60.0:.4f} arcmin")
     
     # will use casacore to generate these later
     if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
@@ -483,7 +495,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         # Create some dask vis data
         dims = ("row", "chan", "corr")
         LOGGER.debug(f"Data size {row} {chan} {corr}")
-        LOGGER.info(f"Data column size {row * chan * corr * 8 / 1024.0**2} MiB")
+        LOGGER.info(f"Data column size {row * chan * corr * 8 / 1024.0**2:.2f} MiB")
 
         #np_data = vis_array.reshape((row, chan, corr))
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
@@ -539,13 +551,23 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
                              f"got {phase_center_policy}")
         
         # apply rephasor if needed
-        if phase_center_policy == 'no-rephase-obs-midpoint':
-            LOGGER.critical("You are choosing to set the field phase direction at the centre point "
-                            "of the observation without rephasing the original zenithal fringe-stopped "
-                            "points. This is not advised and can cause astrometric errors in your image and "
-                            "incorrect UVW coordinates to be written. Do not do this unless your observation "
-                            "is short enough for sources not to move more than a fraction of the instrumental "
-                            "resolution!")
+        mean_sidereal_day = 23 + 56 / 60. + 4.0905 / 3600. # hrs
+        sidereal_rate = 360. / (mean_sidereal_day * 3600) # degrees per second at equator
+        # if we move more than say 5% of the instrument resolution during the observation
+        # then warnings must be raised if we're snapping the field centre without phasing
+        obs_length = np.max(epoch_s) - np.min(epoch_s)
+        snapshot_length_cutoff = reyleigh_crit / sidereal_rate * 0.05 
+
+        if phase_center_policy == 'no-rephase-obs-midpoint' and \
+           obs_length > snapshot_length_cutoff:
+            LOGGER.critical(f"You are choosing to set the field phase direction at the centre point "
+                            f"of the observation without rephasing the original zenithal positions. "
+                            f"This is not advised and can cause astrometric errors in your image and "
+                            f"incorrect UVW coordinates to be written. Do not do this unless your observation "
+                            f"is short enough for sources not to move more than a fraction of the instrumental "
+                            f"resolution! You are predicted to move about "
+                            f"{np.ceil(obs_length / (reyleigh_crit / sidereal_rate) * 100):.0f}% "
+                            f"of the instrument resolution during the course of this observation")
         
         if phase_center_policy == 'rephase-obs-midpoint' or \
            phase_center_policy == 'rephase-NCP' or \
@@ -588,8 +610,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
                 p.next()
             new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
                                      frame='icrs')
-            new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:.0f}h{new_phase_dir.ra.hms[1]:.0f}m{new_phase_dir.ra.hms[2]:.2f}s "\
-                                 f"{new_phase_dir.dec.dms[0]:.0f}d{abs(new_phase_dir.dec.dms[1]):.0f}m{abs(new_phase_dir.dec.dms[2]):.2f}s"
+            new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
+                                 f"{new_phase_dir.dec.dms[0]:02.0f}d{abs(new_phase_dir.dec.dms[1]):02.0f}m{abs(new_phase_dir.dec.dms[2]):05.2f}s"
             LOGGER.info("<Done>")
             LOGGER.info(f"Per user request: Rephase all data to {new_phase_dir_repr}")
             rephased_data = da.empty_like(dask_data)
@@ -610,7 +632,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
             LOGGER.info("No rephasing requested - field centers left as is")
 
         dataset = Dataset({
-            'DATA': (dims, dask_data),
+            'DATA': (dims, dask_data.conj()),
             'FLAG': (dims, da.from_array(flag_data)),
             'TIME': (("row",), da.from_array(timems)),
             'TIME_CENTROID': ("row", da.from_array(timems)),
@@ -658,7 +680,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     elif uvw_generator == 'casacore':
         fixms(ms_table_name)
     else:
-        raise ValueError('uvw_generator expects either mode "telescope" or "casacore"')
+        raise ValueError('uvw_generator expects either mode "telescope_snapshot" or "casacore"')
 
 def __print_infodict_keys(dico_info, keys, just=25):
     LOGGER.info("Observatory parameters:")
