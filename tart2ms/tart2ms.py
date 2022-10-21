@@ -37,7 +37,11 @@ from tart.imaging.visibility import Visibility
 from tart.imaging import calibration
 
 from tart_tools import api_imaging
-from .fixvis import fixms
+from .fixvis import (fixms,
+                     synthesize_uvw,
+                     dense2sparse_uvw,
+                     progress,
+                     rephase)
 
 LOGGER = logging.getLogger()
 
@@ -185,11 +189,16 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         loc = info
 
     lat, lon, height = loc["lat"], loc["lon"], loc["alt"]
-    LOGGER.info(f"pos {lat, lon, height}")
+    LOGGER.info("Telescope position (WGS84):")
+    LOGGER.info(f"\tLat {lat}")
+    LOGGER.info(f"\tLon {lon}")
+    LOGGER.info(f"\tAlt {height}")
 
     array_centroid = ac.EarthLocation.from_geodetic(lat=lat, lon=lon, height=height)
     epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
-    LOGGER.info(f"Time {epoch_s}")
+    LOGGER.debug(f"Time {epoch_s}")
+    LOGGER.info(f"Min time: {np.min(epoch_s)}")
+    LOGGER.info(f"Max time: {np.max(epoch_s)}")
 
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
@@ -215,7 +224,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     corr_types = [[MS_STOKES_ENUMS[p_f] for p_f in pol_feeds]]
 
     LOGGER.info("Pol Feeds {}".format(pol_feeds))
-    LOGGER.info("Correlation Types {}".format(corr_types))
+    LOGGER.debug("Correlation Types {}".format(corr_types))
     num_freq_channels = [1]
 
     ant_table = MSTable(ms_table_name, 'ANTENNA')
@@ -248,7 +257,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     ant_lon_lat = [ac.offset_by(lon=lon*u.deg, lat=lat*u.deg, posang=theta, distance=d)  for theta, d in zip(ant_posang, ant_distance)]
     ant_locations = [EarthLocation.from_geodetic(lon=lon,  lat=lat, height=loc['alt']*u.m,  ellipsoid='WGS84') for lon, lat in ant_lon_lat]
     ant_positions = [[e.x.value, e.y.value, e.z.value] for e in ant_locations]
-    position = da.asarray(ant_positions)
+    antenna_itrf_pos = position = da.asarray(ant_positions)
     
     
     diameter = da.ones(num_ant) * 0.025
@@ -274,8 +283,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     pol_types = pol_feeds
     pol_responses = [POL_RESPONSES[ct] for ct in pol_feeds]
 
-    LOGGER.info("Pol Types {}".format(pol_types))
-    LOGGER.info("Pol Responses {}".format(pol_responses))
+    LOGGER.debug("Pol Types {}".format(pol_types))
+    LOGGER.debug("Pol Responses {}".format(pol_responses))
 
     antenna_ids = da.asarray(range(num_ant))
     feed_ids = da.zeros(num_ant)
@@ -303,23 +312,39 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
 
     ####################### FIELD dataset ####################################
-
+    LOGGER.info(f"Setting phase center per {phase_center_policy}")
     direction = np.array([[phase_j2000.ra.radian, phase_j2000.dec.radian]])
     assert direction.ndim == 3
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
-    if phase_center_policy == "dump":
-        pass
-    elif phase_center_policy == "observation":
+    if phase_center_policy == "instantaneous-zenith":
+        field_name = da.asarray(np.array(list(map(lambda sn: f'zenith_scan_{sn+1}', range(direction.shape[2]))),
+                                     dtype=object),
+                                chunks=1)
+    elif phase_center_policy == "no-rephase-obs-midpoint" or \
+         phase_center_policy == "rephase-obs-midpoint":
         direction = direction[:,:,direction.shape[2]//2].reshape(1,2,1)
+        field_name = da.asarray(np.array(list(map(lambda sn: f'obs_midpoint', range(direction.shape[2]))),
+                                     dtype=object),
+                                chunks=1)
+    elif phase_center_policy == "rephase-SCP":
+        direction = np.array([0, np.deg2rad(-90)]).reshape(1,2,1)
+        field_name = da.asarray(np.array(list(map(lambda sn: f'SCP', range(direction.shape[2]))),
+                                     dtype=object),
+                                chunks=1)
+    elif phase_center_policy == "rephase-NCP":
+        direction = np.array([0, np.deg2rad(90)]).reshape(1,2,1)
+        field_name = da.asarray(np.array(list(map(lambda sn: f'NCP', range(direction.shape[2]))),
+                                     dtype=object),
+                                chunks=1)
     else:
-        raise ValueError(f"phase_center_policy must be one of [dump, observation] got {phase_center_policy}")
+        raise ValueError(f"phase_center_policy must be one of "
+                         f"['instantaneous-zenith','rephase-obs-midpoint','rephase-SCP','rephase-NCP','no-rephase-obs-midpoint'] "
+                         f"got {phase_center_policy}")
     field_direction = da.asarray(
             direction.T.reshape(direction.shape[2],
                                 1, 2).copy(), chunks=(1, None, None)) # nrow x npoly x 2
-    field_name = da.asarray(np.array(list(map(lambda sn: f'zenith_scan_{sn+1}', range(direction.shape[2]))),
-                                     dtype=object),
-                            chunks=1)
+    
     field_num_poly = da.zeros(direction.shape[2], chunks=1) # zeroth order polynomial in time for phase center.
     dir_dims = ("row", 'field-poly', 'field-dir',)
 
@@ -369,16 +394,16 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         corr_prod = [[i, i] for i in range(len(corr_type))]
 
         corr_prod = np.array(corr_prod)
-        LOGGER.info("Corr Prod {}".format(corr_prod))
-        LOGGER.info("Corr Type {}".format(corr_type))
+        LOGGER.debug("Corr Prod {}".format(corr_prod))
+        LOGGER.debug("Corr Type {}".format(corr_type))
 
         dask_num_corr = da.full((1,), len(corr_type), dtype=np.int32)
-        LOGGER.info("NUM_CORR {}".format(dask_num_corr))
+        LOGGER.debug("NUM_CORR {}".format(dask_num_corr))
         dask_corr_type = da.from_array(corr_type,
                                        chunks=len(corr_type))[None, :]
         dask_corr_product = da.asarray(corr_prod)[None, :]
-        LOGGER.info("Dask Corr Prod {}".format(dask_corr_product.shape))
-        LOGGER.info("Dask Corr Type {}".format(dask_corr_type.shape))
+        LOGGER.debug("Dask Corr Prod {}".format(dask_corr_product.shape))
+        LOGGER.debug("Dask Corr Type {}".format(dask_corr_type.shape))
         dataset = Dataset({
             "NUM_CORR": (("row",), dask_num_corr),
             "CORR_TYPE": (("row", "corr"), dask_corr_type),
@@ -389,9 +414,10 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
     # Create multiple SPECTRAL_WINDOW datasets
     # Dataset per output row required because column shapes are variable
-
+    spw_chan_freqs = []
     for spw_i, num_chan in enumerate(num_freq_channels):
         dask_num_chan = da.full((1,), num_chan, dtype=np.int32, chunks=(1,))
+        spw_chan_freqs.append(np.array([info['operating_frequency']]))
         dask_chan_freq = da.asarray([[info['operating_frequency']]], chunks=(1, None))
         dask_chan_width = da.full((1, num_chan), 2.5e6/num_chan, chunks=(1, None))
         spw_name = da.asarray(np.array([f"IF{spw_i}"], dtype=object), chunks=(1,))
@@ -456,7 +482,8 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
         # Create some dask vis data
         dims = ("row", "chan", "corr")
-        LOGGER.info(f"Data size {row} {chan} {corr}")
+        LOGGER.debug(f"Data size {row} {chan} {corr}")
+        LOGGER.info(f"Data column size {row * chan * corr * 8 / 1024.0**2} MiB")
 
         #np_data = vis_array.reshape((row, chan, corr))
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
@@ -467,16 +494,15 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
         data_chunks = tuple((chunks['row'], chan, corr))
         dask_data = da.from_array(np_data, chunks=data_chunks)
-
         flag_categories = da.from_array(0.05*np.ones((row, chan, corr, 1)))
         flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
 
         uvw_data = da.from_array(np_uvw)
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks['row'], dtype=np.int32)
-        if dask_data.shape[0] % len(epoch_s) != 0:
+        if np_data.shape[0] % len(epoch_s) != 0:
             raise RuntimeError("Expected nrow to be integral multiple of number of time slots")
-        if dask_data.shape[0] != len(epoch_s) * nbl:
+        if np_data.shape[0] != len(epoch_s) * nbl:
             raise RuntimeError("Some baselines are missing in the data array. Not supported")
         epoch_s_arr = np.array(epoch_s)
         intervals = np.zeros(len(epoch_s_arr), dtype=np.float64)
@@ -492,25 +518,102 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         # TODO: This should really be made better - partial dumps should be
         # downweighted
         exposure = intervals.copy()
-        
-        if phase_center_policy == "dump":
+        timems = np.repeat(epoch_s, nbl)
+
+        if phase_center_policy == 'instantaneous-zenith':
             # scan number - treat each integration as a scan
             scan = np.arange(len(epoch_s), dtype=int).repeat(nbl) + 1 # offset to start at 1, per convention
             # each integration should have its own phase tracking centre
             # to ensure we can rephase them to a common frame in the end
             field_no = scan.copy() - 1 # offset to start at 0 (FK)
-        elif phase_center_policy == "observation":
+        elif phase_center_policy == 'no-rephase-obs-midpoint' or \
+             phase_center_policy == 'rephase-obs-midpoint' or \
+             phase_center_policy == 'rephase-NCP' or \
+             phase_center_policy == 'rephase-SCP':
             # user is just going to get a single zenith position at the observation centoid
             scan = np.ones(len(epoch_s), dtype=int).repeat(nbl) # start at 1, per convention
             field_no = np.zeros_like(scan)
         else:
-            raise ValueError(f"phase_center_policy must be one of [dump, observation] got {phase_center_policy}")
+            raise ValueError(f"phase_center_policy must be one of "
+                             f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint','rephase-SCP','rephase-NCP'] "
+                             f"got {phase_center_policy}")
         
+        # apply rephasor if needed
+        if phase_center_policy == 'no-rephase-obs-midpoint':
+            LOGGER.critical("You are choosing to set the field phase direction at the centre point "
+                            "of the observation without rephasing the original zenithal fringe-stopped "
+                            "points. This is not advised and can cause astrometric errors in your image and "
+                            "incorrect UVW coordinates to be written. Do not do this unless your observation "
+                            "is short enough for sources not to move more than a fraction of the instrumental "
+                            "resolution!")
+        
+        if phase_center_policy == 'rephase-obs-midpoint' or \
+           phase_center_policy == 'rephase-NCP' or \
+           phase_center_policy == 'rephase-SCP':
+            # we must first have accurate uvw coordinates in each different zenith direction
+            assert direction.ndim == 3
+            assert direction.shape[0] == 1
+            assert direction.shape[1] == 2
+            zenith_directions = np.array([[phase_j2000.ra.radian, phase_j2000.dec.radian]]) 
+            zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
+                                                          zenith_directions.shape[2]).T.copy()
+            if phase_center_policy == 'rephase-obs-midpoint':
+                centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(1, 2)
+            elif phase_center_policy == 'rephase-NCP':
+                centroid_direction = np.array([0,np.deg2rad(+90)]).reshape(1, 2)
+            elif phase_center_policy == 'rephase-SCP':
+                centroid_direction = np.array([0,np.deg2rad(-90)]).reshape(1, 2)
+            else:
+                raise RuntimeError("Invalid phaseing option")
+            
+            map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
+            subfields = np.unique(map_row_to_zendir)
+            assert zenith_directions.shape[0] == subfields.size
+            p = progress("Computing UVW towards original zenith points", max=subfields.size)
+            for sfi in subfields:
+                selrow = map_row_to_zendir == sfi
+                this_phase_dir = zenith_directions[sfi].reshape(1, 2)
+                padded_uvw = synthesize_uvw(station_ECEF=antenna_itrf_pos.compute(),
+                                            time=timems[selrow],
+                                            a1=baselines[:, 0][selrow],
+                                            a2=baselines[:, 1][selrow],
+                                            phase_ref=this_phase_dir,
+                                            ack=False)
+                uvw_data[selrow] = dense2sparse_uvw(a1=baselines[:, 0][selrow],
+                                                    a2=baselines[:, 1][selrow],
+                                                    time=timems[selrow],
+                                                    ddid=(np.ones(selrow.size)*ddid)[selrow],
+                                                    padded_uvw=padded_uvw["UVW"],
+                                                    ack=False)
+                p.next()
+            new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
+                                     frame='icrs')
+            new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:.0f}h{new_phase_dir.ra.hms[1]:.0f}m{new_phase_dir.ra.hms[2]:.2f}s "\
+                                 f"{new_phase_dir.dec.dms[0]:.0f}d{abs(new_phase_dir.dec.dms[1]):.0f}m{abs(new_phase_dir.dec.dms[2]):.2f}s"
+            LOGGER.info("<Done>")
+            LOGGER.info(f"Per user request: Rephase all data to {new_phase_dir_repr}")
+            rephased_data = da.empty_like(dask_data)
+            
+            rephased_data = \
+            da.map_blocks(rephase, 
+                            dask_data,
+                            dtype=dask_data.dtype,
+                            chunks=dask_data.chunks,
+                            #kwargs for rephase
+                            freq=spw_chan_freqs[spw_id],
+                            pos=np.rad2deg(centroid_direction[0, :]),
+                            uvw=uvw_data,
+                            refdir=np.rad2deg(zenith_directions),
+                            field_ids=map_row_to_zendir)
+            dask_data = rephased_data
+        else:
+            LOGGER.info("No rephasing requested - field centers left as is")
+
         dataset = Dataset({
             'DATA': (dims, dask_data),
             'FLAG': (dims, da.from_array(flag_data)),
-            'TIME': (("row",), da.from_array(np.repeat(epoch_s, nbl))),
-            'TIME_CENTROID': ("row", da.from_array(np.repeat(epoch_s, nbl))),
+            'TIME': (("row",), da.from_array(timems)),
+            'TIME_CENTROID': ("row", da.from_array(timems)),
             'WEIGHT': (("row", "corr"), da.from_array(0.95*np.ones((row, corr)))),
             'WEIGHT_SPECTRUM': (dims, da.from_array(0.95*np.ones_like(np_data, dtype=np.float64))),
             # BH: conformance issue, see CASA documentation on weighting
@@ -550,9 +653,21 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     dask.compute(spw_writes)
     dask.compute(ddid_writes)
 
+    if uvw_generator == 'telescope_snapshot':
+        pass
+    elif uvw_generator == 'casacore':
+        fixms(ms_table_name)
+    else:
+        raise ValueError('uvw_generator expects either mode "telescope" or "casacore"')
+
+def __print_infodict_keys(dico_info, keys, just=25):
+    LOGGER.info("Observatory parameters:")
+    for k in keys:
+        val = dico_info.get(k, "Information Unavailable")
+        reprk = str(k).ljust(just, " ")
+        LOGGER.info(f"\t{reprk}: {val}")
 
 def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore"):
-    LOGGER.info(f"Dumping phase center per {phase_center_policy}")
     if pol2:
         pol_feeds = [ 'RR', 'LL' ]
     else:
@@ -564,18 +679,25 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
     all_baselines = []
     ant_pos_orig = None
     orig_dico_info = None
+    LOGGER.info("Will process HDF5 file: ")
+    for h5 in h5file:
+        LOGGER.info(f"\t '{h5}'")
 
+    p = progress("Processing HDF database", max=len(h5file))
     for ih5, h5 in enumerate(h5file):
         with h5py.File(h5, "r") as h5f:
-            LOGGER.info(f"Processing h5 database {ih5+1}/{len(h5file)}: '{h5}'")
             config_string = np.string_(h5f['config'][0]).decode('UTF-8')
             if ih5 == 0:
-                LOGGER.info("config_string = {}".format(config_string))
+                LOGGER.debug("config_string = {}".format(config_string))
 
             config_json = json.loads(config_string)
             config_json['operating_frequency'] = config_json['frequency']
             if ih5 == 0:
-                LOGGER.info(f"config_json = {json.dumps(config_json, indent=4, sort_keys=True)}")
+                LOGGER.debug(f"config_json = {json.dumps(config_json, indent=4, sort_keys=True)}")
+                __print_infodict_keys(config_json, 
+                                      ["L0_frequency","bandwidth","baseband_frequency",
+                                       "operating_frequency","name","num_antenna",
+                                       "sampling_frequency"])
             config = settings.from_json(config_string)
             hdf_baselines = h5f['baselines'][:]
             hdf_phase_elaz = h5f['phase_elaz'][:]
@@ -637,7 +759,9 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 for bl in baselines:
                     all_baselines.append(bl)
                 all_times.append(ts)
-
+        p.next()
+    
+    LOGGER.info("<Done>")
     # finally create concat ms
     all_vis = np.array(all_vis).flatten()
     all_baselines = np.array(all_baselines)
@@ -652,23 +776,17 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 phase_center_policy=phase_center_policy,
                 override_telescope_name=override_telescope_name,
                 uvw_generator=uvw_generator)
-    
-    if uvw_generator == 'telescope_snapshot':
-        pass
-    elif uvw_generator == 'casacore':
-        fixms(ms_name)
-    else:
-        raise ValueError('uvw_generator expects either mode "telescope" or "casacore"')
 
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name, 
                  uvw_generator="casacore", json_data=None):
-    LOGGER.info(f"Dumping phase center per {phase_center_policy}")
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
             json_filename = [json_filename]
         json_data = []
+        LOGGER.info("Will process JSON file: ")
         for jfi in json_filename:
+            LOGGER.info(f"\t '{jfi}'")    
             with open(jfi, 'r') as json_file:
                 json_data.append(json.load(json_file))
     elif json_filename is None and json_data is not None:
@@ -682,9 +800,9 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
     all_baselines = []
     ant_pos_orig = None
     orig_dico_info = None
+    p = progress("Processing JSON database", max=len(json_data))
     for ijdi, jdi in enumerate(json_data):
-        LOGGER.info(f"Processing JSON database {ijdi+1}/{len(json_data)}")
-        info = jdi['info']
+        info = jdi['info']    
         ant_pos = jdi['ant_pos']
         config = settings.from_api_json(info['info'], ant_pos)
         gains = jdi['gains']['gain']
@@ -738,7 +856,12 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         for bl in baselines:
             all_baselines.append(bl)
         all_times.append(timestamp)
-    
+        p.next()
+    LOGGER.info("<Done>")
+    __print_infodict_keys(orig_dico_info, 
+                          ["L0_frequency","bandwidth","baseband_frequency",
+                           "operating_frequency","name","num_antenna",
+                           "sampling_frequency"])
     # finally concat into a single measurement set
     all_vis = np.array(all_vis).flatten()
     all_baselines = np.array(all_baselines)
@@ -752,9 +875,3 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
               sources=src_list,
               phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name, uvw_generator=uvw_generator)
-    if uvw_generator == 'telescope_snapshot':
-        pass
-    elif uvw_generator == 'casacore':        
-        fixms(ms_name)
-    else:
-        raise ValueError('uvw_generator expects either mode "telescope_snapshot" or "casacore"')
