@@ -493,7 +493,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         # Create some dask vis data
         dims = ("row", "chan", "corr")
         LOGGER.debug(f"Data size {row} {chan} {corr}")
-        LOGGER.info(f"Data column size {row * chan * corr * 8 / 1024.0**2} MiB")
+        LOGGER.info(f"Data column size {row * chan * corr * 8 / 1024.0**2:.2f} MiB")
 
         #np_data = vis_array.reshape((row, chan, corr))
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
