@@ -148,7 +148,7 @@ def timestamp_to_ms_epoch(t_stamp):
     
 
 def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources, phase_center_policy, override_telescope_name,
-              uvw_generator=''):
+              uvw_generator='casacore'):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
