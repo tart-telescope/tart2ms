@@ -376,10 +376,10 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
                 dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime[0],
                                     frame = 'altaz', location = location)
                 dir_j2000 = dir_altaz.transform_to('fk5')
-                direction = [dir_j2000.ra.radian, dir_j2000.dec.radian]
-                LOGGER.debug(f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction}")
+                direction_src = [dir_j2000.ra.radian, dir_j2000.dec.radian]
+                LOGGER.debug(f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}")
                 dask_num_lines = da.asarray(np.asarray([1], dtype=np.int32)) # , 1, dtype=np.int32)
-                dask_direction = da.asarray(np.asarray(direction, dtype=np.float64), chunks=1)[None, :]
+                dask_direction = da.asarray(np.asarray(direction_src, dtype=np.float64), chunks=1)[None, :]
                 dask_name = da.asarray(np.asarray([name], dtype=object), chunks=1)
                 dask_time = da.asarray(np.asarray([epoch_s_i], dtype=object), chunks=1)
                 dataset = Dataset({
