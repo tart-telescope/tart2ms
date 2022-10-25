@@ -148,7 +148,7 @@ def timestamp_to_ms_epoch(t_stamp):
     
 
 def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources, phase_center_policy, override_telescope_name,
-              uvw_generator='casacore'):
+              uvw_generator=''):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -199,9 +199,9 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
-    # iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all'
-    # iers.conf.auto_max_age = None
-    # 
+    iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all'
+    iers.conf.auto_max_age = None
+
     location = EarthLocation.from_geodetic(lon=loc['lon']*u.deg,
                                            lat=loc['lat']*u.deg,
                                            height=loc['alt']*u.m,
@@ -366,25 +366,29 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     obs_table.append(dataset)
 
     ######################## SOURCE datasets ########################################
-    for src in sources:
-        name = src['name']
-        # Convert to J2000
-        dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime[0],
-                             frame = 'altaz', location = location)
-        dir_j2000 = dir_altaz.transform_to('fk5')
-        direction = [dir_j2000.ra.radian, dir_j2000.dec.radian]
-        LOGGER.info(f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction}")
-        dask_num_lines = da.asarray(np.asarray([1], dtype=np.int32)) # , 1, dtype=np.int32)
-        dask_direction = da.asarray(np.asarray(direction, dtype=np.float64), chunks=1)[None, :]
-        dask_name = da.asarray(np.asarray([name], dtype=object), chunks=1)
-        dask_time = da.asarray(np.asarray(epoch_s, dtype=object), chunks=1)
-        dataset = Dataset({
-            "NUM_LINES": (("row",), dask_num_lines),
-            "NAME": (("row",), dask_name),
-            "TIME": (("row",), dask_time),
-            "DIRECTION": (("row", "dir"), dask_direction),
-            })
-        src_table.append(dataset)
+    if sources:
+        if len(epoch_s) != len(sources):
+            raise RuntimeError("If sources are specified then we expected epochs to be of same size as sources list")
+        for epoch_s_i, sources_i in zip(epoch_s, sources):
+            for src in sources_i:
+                name = src['name']
+                # Convert to J2000
+                dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime[0],
+                                    frame = 'altaz', location = location)
+                dir_j2000 = dir_altaz.transform_to('fk5')
+                direction = [dir_j2000.ra.radian, dir_j2000.dec.radian]
+                LOGGER.debug(f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction}")
+                dask_num_lines = da.asarray(np.asarray([1], dtype=np.int32)) # , 1, dtype=np.int32)
+                dask_direction = da.asarray(np.asarray(direction, dtype=np.float64), chunks=1)[None, :]
+                dask_name = da.asarray(np.asarray([name], dtype=object), chunks=1)
+                dask_time = da.asarray(np.asarray([epoch_s_i], dtype=object), chunks=1)
+                dataset = Dataset({
+                    "NUM_LINES": (("row",), dask_num_lines),
+                    "NAME": (("row",), dask_name),
+                    "TIME": (("row",), dask_time),
+                    "DIRECTION": (("row", "dir"), dask_direction),
+                    })
+                src_table.append(dataset)
 
     # Create POLARISATION datasets.
     # Dataset per output row required because column shapes are variable
@@ -819,6 +823,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
     
     all_times = []
     all_vis = []
+    all_sources = []
     all_baselines = []
     ant_pos_orig = None
     orig_dico_info = None
@@ -839,11 +844,17 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
             orig_dico_info = info["info"]
 
         config_same = True
+        opt_keys = ["lat", "lon", "alt", "orientation", "axes"]
         for check_key in ["L0_frequency", "bandwidth", "baseband_frequency",
                           "num_antenna", "operating_frequency", "sampling_frequency",
                           "lat", "lon", "alt", "orientation", "axes"]:
             if check_key not in info["info"] or check_key not in orig_dico_info:
-                raise RuntimeError(f"Key {check_key} missing from database!")
+                if check_key not in opt_keys:
+                    raise RuntimeError(f"Key {check_key} missing from database!")
+                else:
+                    LOGGER.critical(f"Key {check_key} missing from database, but appears to be optional."
+                                    f"You may be using old databases!")
+                    continue
             if isinstance(orig_dico_info[check_key], float):
                 config_same = config_same and \
                               np.isclose(orig_dico_info[check_key],
@@ -855,7 +866,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
                 config_same = config_same and \
                               orig_dico_info[check_key] == \
                                   info["info"][check_key]
-        
+
         if not config_same:
             raise RuntimeError("The databases you are trying to concatenate have different configurations. "
                                 "This is not yet supported. You could try running CASA virtualconcat to "
@@ -866,7 +877,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
             vis_json, source_json = d
             cal_vis, timestamp = api_imaging.vis_calibrated(vis_json, config, gains, phases, [])
             src_list = source_json
-
+            all_sources.append(src_list) # a list of sources per timestamp so we can zip them correctly
         if pol2:
             pol_feeds = [ 'RR', 'LL' ]
         else:
@@ -894,6 +905,6 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
               baselines=all_baselines,
               timestamps=all_times,
               pol_feeds=pol_feeds,
-              sources=src_list,
+              sources=all_sources,
               phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name, uvw_generator=uvw_generator)
