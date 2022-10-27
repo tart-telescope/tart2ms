@@ -19,7 +19,6 @@ import numpy as np
 
 from itertools import product
 
-from casacore.measures import measures
 from casacore.quanta import quantity
 
 from astropy import coordinates as ac
@@ -28,12 +27,10 @@ from daskms import Dataset, xds_to_table
 
 import astropy.units as u
 from astropy.time import Time
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz, Angle
-from astropy.utils import iers
+from astropy.coordinates import SkyCoord, EarthLocation, Angle
 from astropy.constants import R_earth, c as lightspeed
 
 
-from tart.util import constants
 from tart.operation import settings
 from tart.imaging.visibility import Visibility
 from tart.imaging import calibration
@@ -145,9 +142,16 @@ def timestamp_to_ms_epoch(t_stamp):
       measurement sets.
     '''
     return quantity(t_stamp.isoformat()).get_value("s")
-    
 
-def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, pol_feeds, sources, phase_center_policy, override_telescope_name,
+
+def ms_create(ms_table_name, info,
+              ant_pos, vis_array,
+              baselines,
+              timestamps,
+              pol_feeds,
+              sources,
+              phase_center_policy,
+              override_telescope_name,
               uvw_generator='casacore'):
     ''' Create a Measurement Set from some TART observations
 
@@ -183,7 +187,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     '''
     try:
         loc = info['location']
-    except:
+    except Exception:
         loc = info
 
     lat, lon, height = loc["lat"], loc["lon"], loc["alt"]
@@ -213,7 +217,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     # LOGGER.info(f"local_frame {local_frame}")
 
     phase_altaz = SkyCoord(alt=[90.0*u.deg]*len(obstime), az=[0.0*u.deg]*len(obstime),
-                           obstime = obstime, frame = 'altaz', location = location)
+                           obstime=obstime, frame='altaz', location=location)
     phase_j2000 = phase_altaz.transform_to('fk5')
     LOGGER.debug(f"phase_j2000 {phase_j2000}")
 
@@ -243,20 +247,22 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     # Each column in the ANTENNA has a fixed shape so we
     # can represent all rows with one dataset
     num_ant = len(ant_pos)
-    
-    ########################### Now convert each antenna location to ECEF coordinates for the measurement set. #######################
+
+    # Now convert each antenna location to ECEF coordinates for the measurement set
     # This is laborious but seems to work.
     #
-    ant_posang = [Angle(np.arctan2(a[0],a[1]), unit=u.rad) for a in ant_pos]  # Zero is due north.
-    ant_s = [np.sqrt(a[0]*a[0] + a[1]*a[1])  for a in ant_pos]
-    ant_distance = [s / R_earth.value  for s in ant_s]
-    
-    ant_lon_lat = [ac.offset_by(lon=lon*u.deg, lat=lat*u.deg, posang=theta, distance=d)  for theta, d in zip(ant_posang, ant_distance)]
-    ant_locations = [EarthLocation.from_geodetic(lon=lon,  lat=lat, height=loc['alt']*u.m,  ellipsoid='WGS84') for lon, lat in ant_lon_lat]
+    ant_posang = [Angle(np.arctan2(a[0], a[1]), unit=u.rad) for a in ant_pos]  # Zero is due north.
+    ant_s = [np.sqrt(a[0]*a[0] + a[1]*a[1]) for a in ant_pos]
+    ant_distance = [(s / R_earth.value) for s in ant_s]
+
+    ant_lon_lat = [ac.offset_by(lon=lon*u.deg, lat=lat*u.deg, posang=theta, distance=d)
+                   for theta, d in zip(ant_posang, ant_distance)]
+    ant_locations = [EarthLocation.from_geodetic(lon=lon,  lat=lat, height=loc['alt']*u.m,  ellipsoid='WGS84')
+                     for lon, lat in ant_lon_lat]
     ant_positions = [[e.x.value, e.y.value, e.z.value] for e in ant_locations]
     antenna_itrf_pos = position = da.asarray(ant_positions)
-    
-    
+
+    # Antenna diameter in meters
     diameter = da.ones(num_ant) * 0.025
     offset = da.zeros((num_ant, 3))
     names = np.array(['ANTENNA-%d' % i for i in range(num_ant)], dtype=object)
@@ -274,7 +280,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     })
     ant_table.append(dataset)
 
-    ###################  Create a FEED dataset. ###################################
+    # Create a FEED dataset
     # There is one feed per antenna, so this should be quite similar to the ANTENNA
     num_pols = len(pol_feeds)
     pol_types = pol_feeds
@@ -307,44 +313,42 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     })
     feed_table.append(dataset)
 
-
-    ####################### FIELD dataset ####################################
+    # ------------------------ FIELD dataset -------------------------- #
     LOGGER.info(f"Setting phase center per {phase_center_policy}")
     direction = np.array([[phase_j2000.ra.radian, phase_j2000.dec.radian]])
     assert direction.ndim == 3
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
+
     def __twelveball(direction):
         """ standardized Jhhmmss-ddmmss name """
-        sc_dir = SkyCoord(direction[0]*u.rad, direction[1]*u.rad,
-                            frame='icrs')
+        sc_dir = SkyCoord(direction[0]*u.rad, direction[1]*u.rad, frame='icrs')
         sign = "-" if sc_dir.dec.dms[0] < 0 else "+"
         sc_dir_repr = f"J{sc_dir.ra.hms[0]:02.0f}{sc_dir.ra.hms[1]:02.0f}{sc_dir.ra.hms[2]:02.0f}"\
                       f"{sign}"\
                       f"{abs(sc_dir.dec.dms[0]):02.0f}{abs(sc_dir.dec.dms[1]):02.0f}{abs(sc_dir.dec.dms[2]):02.0f}"
         return sc_dir_repr
+
     if phase_center_policy == "instantaneous-zenith":
         pass
-    elif phase_center_policy == "no-rephase-obs-midpoint" or \
-         phase_center_policy == "rephase-obs-midpoint":
-        direction = direction[:,:,direction.shape[2]//2].reshape(1,2,1)
+    elif (phase_center_policy == "no-rephase-obs-midpoint") or \
+         (phase_center_policy == "rephase-obs-midpoint"):
+        direction = direction[:, :, direction.shape[2]//2].reshape(1, 2, 1)
     elif phase_center_policy == "rephase-SCP":
-        direction = np.array([0, np.deg2rad(-90)]).reshape(1,2,1)
+        direction = np.array([0, np.deg2rad(-90)]).reshape(1, 2, 1)
     elif phase_center_policy == "rephase-NCP":
-        direction = np.array([0, np.deg2rad(90)]).reshape(1,2,1)
+        direction = np.array([0, np.deg2rad(90)]).reshape(1, 2, 1)
     else:
         raise ValueError(f"phase_center_policy must be one of "
-                         f"['instantaneous-zenith','rephase-obs-midpoint','rephase-SCP','rephase-NCP','no-rephase-obs-midpoint'] "
-                         f"got {phase_center_policy}")
-    field_name = da.asarray(np.array(list(map(__twelveball,
-                                              direction.reshape(2, direction.shape[2]).T)),
-                                     dtype=object),
-                            chunks=1)
+                         f"['instantaneous-zenith','rephase-obs-midpoint','rephase-SCP','rephase-NCP',"
+                         f"'no-rephase-obs-midpoint'] got {phase_center_policy}")
+    field_name = da.asarray(np.array(list(map(__twelveball, direction.reshape(2, direction.shape[2]).T)),
+                                     dtype=object), chunks=1)
     field_direction = da.asarray(
             direction.T.reshape(direction.shape[2],
-                                1, 2).copy(), chunks=(1, None, None)) # nrow x npoly x 2
-    
-    field_num_poly = da.zeros(direction.shape[2], chunks=1) # zeroth order polynomial in time for phase center.
+                                1, 2).copy(), chunks=(1, None, None))  # nrow x npoly x 2
+
+    field_num_poly = da.zeros(direction.shape[2], chunks=1)  # zeroth order polynomial in time for phase center.
     dir_dims = ("row", 'field-poly', 'field-dir',)
 
     dataset = Dataset({
@@ -356,16 +360,16 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     })
     field_table.append(dataset)
 
-   ######################### OBSERVATION dataset #####################################
+    # ------------------------ OBSERVATION dataset ---------------------------- #
     LOGGER.info(f"Writing MS for telescope name '{override_telescope_name}'")
     dataset = Dataset({
         'TELESCOPE_NAME': (("row",), da.asarray(np.asarray([override_telescope_name], dtype=object), chunks=1)),
         'OBSERVER': (("row",), da.asarray(np.asarray(['Tim'], dtype=object), chunks=1)),
-        "TIME_RANGE": (("row","obs-exts"), da.asarray(np.array([[epoch_s[0], epoch_s[-1]]]), chunks=1)),
+        "TIME_RANGE": (("row", "obs-exts"), da.asarray(np.array([[epoch_s[0], epoch_s[-1]]]), chunks=1))
     })
     obs_table.append(dataset)
 
-    ######################## SOURCE datasets ########################################
+    # ----------------------------- SOURCE datasets -------------------------- #
     if sources:
         if len(epoch_s) != len(sources):
             raise RuntimeError("If sources are specified then we expected epochs to be of same size as sources list")
@@ -373,12 +377,12 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
             for src in sources_i:
                 name = src['name']
                 # Convert to J2000
-                dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime = obstime[0],
-                                    frame = 'altaz', location = location)
+                dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime=obstime[0],
+                                     frame='altaz', location=location)
                 dir_j2000 = dir_altaz.transform_to('fk5')
                 direction_src = [dir_j2000.ra.radian, dir_j2000.dec.radian]
                 LOGGER.debug(f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}")
-                dask_num_lines = da.asarray(np.asarray([1], dtype=np.int32)) # , 1, dtype=np.int32)
+                dask_num_lines = da.asarray(np.asarray([1], dtype=np.int32))  # , 1, dtype=np.int32)
                 dask_direction = da.asarray(np.asarray(direction_src, dtype=np.float64), chunks=1)[None, :]
                 dask_name = da.asarray(np.asarray([name], dtype=object), chunks=1)
                 dask_time = da.asarray(np.asarray([epoch_s_i], dtype=object), chunks=1)
@@ -427,14 +431,14 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         # TOPO Frame -- we are not regrididng to new reference frequency
         meas_freq_ref = da.asarray(np.array([5], dtype=int), chunks=(1,))
         dataset = Dataset({
-            "MEAS_FREQ_REF": (("row",), meas_freq_ref), 
+            "MEAS_FREQ_REF": (("row",), meas_freq_ref),
             "NUM_CHAN": (("row",), dask_num_chan),
             "CHAN_FREQ": (("row", "chan"), dask_chan_freq),
             "CHAN_WIDTH": (("row", "chan"), dask_chan_width),
             "EFFECTIVE_BW": (("row", "chan"), dask_chan_width),
             "RESOLUTION": (("row", "chan"), dask_chan_width),
             "TOTAL_BANDWIDTH": (("row",), da.sum(dask_chan_width, axis=1)),
-            "NAME": (("row",), spw_name) 
+            "NAME": (("row",), spw_name)
         })
 
         spw_datasets.append(dataset)
@@ -453,14 +457,14 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
     # Now create the associated MS dataset
 
-    #vis_data, baselines = cal_vis.get_all_visibility()
-    #vis_array = np.array(vis_data, dtype=np.complex64)
+    # vis_data, baselines = cal_vis.get_all_visibility()
+    # vis_array = np.array(vis_data, dtype=np.complex64)
     chunks = {
         "row": (vis_array.shape[0],),
     }
     baselines = np.array(baselines)
     nbl = np.unique(baselines, axis=0).shape[0]
-    baseline_lengths = (da.sqrt((antenna_itrf_pos[baselines[:, 0]] - 
+    baseline_lengths = (da.sqrt((antenna_itrf_pos[baselines[:, 0]] -
                                  antenna_itrf_pos[baselines[:, 1]])**2)).compute()
     max_baseline = np.max(baseline_lengths)
     min_baseline = np.min(baseline_lengths)
@@ -473,14 +477,14 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
     LOGGER.info(f"\tMinimum: {min_baseline:.4f} m")
     LOGGER.info(f"\tMaximum: {max_baseline:.4f} m --- {max_baseline/min_wl:.4f} wavelengths")
     LOGGER.info(f"Appoximate unweighted instrument resolution: {reyleigh_crit * 60.0:.4f} arcmin")
-    
+
     # will use casacore to generate these later
     if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
         LOGGER.warn(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
                     f"for multi-timestamp databases. Your UVW coordinates will be wrong")
     if uvw_generator == 'telescope_snapshot':
         bl_pos = np.array(ant_pos)[baselines]
-        uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T #/constants.L1_WAVELENGTH
+        uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
         # Use the - sign to get the same orientation as our tart projections.
         uvw_array = np.array([uu_a, vv_a, ww_a]).T
     elif uvw_generator == 'casacore':
@@ -488,10 +492,9 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
     else:
         raise ValueError('uvw_generator expects either mode "telescope_snapshot" or "casacore"')
-    
+
     for ddid, (spw_id, pol_id) in enumerate(zip(spw_ids, pol_ids)):
         # Infer row, chan and correlation shape
-        #LOGGER.info("ddid:{} ({}, {})".format(ddid, spw_id, pol_id))
         row = sum(chunks['row'])
         chan = spw_datasets[spw_id].CHAN_FREQ.shape[1]
         corr = pol_table.datasets[pol_id].CORR_TYPE.shape[1]
@@ -501,11 +504,9 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
         LOGGER.debug(f"Data size {row} {chan} {corr}")
         LOGGER.info(f"Data column size {row * chan * corr * 8 / 1024.0**2:.2f} MiB")
 
-        #np_data = vis_array.reshape((row, chan, corr))
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
         for i in range(corr):
             np_data[:, :, i] = vis_array.reshape((row, chan))
-        #np_data = np.array([vis_array.reshape((row, chan, 1)) for i in range(corr)])
         np_uvw = uvw_array.reshape((row, 3))
 
         data_chunks = tuple((chunks['row'], chan, corr))
@@ -529,7 +530,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
             # currently there are edge cases where we have disjoint observations
             intervals[...] = np.median(epoch_s_arr[1:] - epoch_s_arr[:-1])
         else:
-            intervals[0] = 1.0 # TODO: Fallover what is the default integration interval
+            intervals[0] = 1.0  # TODO: Fallover what is the default integration interval
         intervals = intervals.repeat(nbl)
         # TODO: This should really be made better - partial dumps should be
         # downweighted
@@ -538,14 +539,14 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
 
         if phase_center_policy == 'instantaneous-zenith':
             # scan number - treat each integration as a scan
-            scan = np.arange(len(epoch_s), dtype=int).repeat(nbl) + 1 # offset to start at 1, per convention
+            scan = np.arange(len(epoch_s), dtype=int).repeat(nbl) + 1  # offset to start at 1, per convention
             # each integration should have its own phase tracking centre
             # to ensure we can rephase them to a common frame in the end
-            field_no = scan.copy() - 1 # offset to start at 0 (FK)
-        elif phase_center_policy == 'no-rephase-obs-midpoint' or \
-             phase_center_policy == 'rephase-obs-midpoint' or \
-             phase_center_policy == 'rephase-NCP' or \
-             phase_center_policy == 'rephase-SCP':
+            field_no = scan.copy() - 1  # offset to start at 0 (FK)
+        elif (phase_center_policy == 'no-rephase-obs-midpoint' or
+              phase_center_policy == 'rephase-obs-midpoint' or
+              phase_center_policy == 'rephase-NCP' or
+              phase_center_policy == 'rephase-SCP'):
             # user is just going to get a single zenith position at the observation centoid
             scan = np.ones(len(epoch_s), dtype=int).repeat(nbl) # start at 1, per convention
             field_no = np.zeros_like(scan)
@@ -590,7 +591,7 @@ def ms_create(ms_table_name, info, ant_pos, vis_array, baselines, timestamps, po
             elif phase_center_policy == 'rephase-SCP':
                 centroid_direction = np.array([0,np.deg2rad(-90)]).reshape(1, 2)
             else:
-                raise RuntimeError("Invalid phaseing option")
+                raise RuntimeError("Invalid rephase option")
             
             map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
             subfields = np.unique(map_row_to_zendir)

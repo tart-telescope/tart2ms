@@ -13,7 +13,7 @@ test:
 	pytest-3
 	
 lint:
-	pylint --extension-pkg-whitelist=numpy --ignored-modules=numpy,tart_tools,dask,dask.array --extension-pkg-whitelist=astropy --extension-pkg-whitelist=dask tart2ms
+	flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
 clean:	${MS}
 	${WSCLEAN} ${MS}

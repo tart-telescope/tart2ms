@@ -19,7 +19,8 @@ import disko
 
 TEST_H5 = './test_data/vis_2021-03-25_20_50_23.568474.hdf'
 TEST_JSON = 'tart2ms/tests/data_test.json'
-TEST_MS = os.path.join(tempfile.gettempdir(), 'test.ms')
+TMP_MS = os.path.join(tempfile.gettempdir(), 'test.ms')
+TEST_MS = 'test.ms'
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler()) # Add a null handler so logs can go somewhere
@@ -45,9 +46,9 @@ class TestTart2MS(unittest.TestCase):
         shutil.rmtree('test.ms')
 
     def test_tmp_dir(self):
-        self.check_ms(TEST_MS)
-        self.assertTrue(os.path.exists(TEST_MS))
-        shutil.rmtree(TEST_MS)
+        self.check_ms(TMP_MS)
+        self.assertTrue(os.path.exists(TMP_MS))
+        shutil.rmtree(TMP_MS)
 
 
     def test_uv_equal(self):
