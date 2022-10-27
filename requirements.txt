@@ -1,0 +1,9 @@
+dask-ms>=0.2.8
+python-casacore>=3.5
+tart>=1.1.2b2
+tart_tools>=1.1.2b2
+astropy>=4.3
+numpy>=1.21
+h5py>=3.7
+progress>=1.6
+disko>=0.9.3b2

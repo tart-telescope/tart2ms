@@ -30,8 +30,8 @@ class TestTart2MS(unittest.TestCase):
 
     def check_ms(self, test_ms):
         shutil.rmtree(test_ms, ignore_errors=True)
-        ms_from_json(test_ms, self.json_data, pol2=False, 
-                    phase_center_policy='dump',
+        ms_from_json(test_ms, TEST_JSON, pol2=False, 
+                    phase_center_policy='instantaneous-zenith',
                     override_telescope_name='TART',
                     uvw_generator="telescope_snapshot")
 
@@ -97,7 +97,7 @@ class TestTart2MS(unittest.TestCase):
         '''
 
         ms_from_hdf5(ms_name='test_h5.ms', h5file=TEST_H5, pol2=False, 
-                     phase_center_policy='dump', 
+                     phase_center_policy='instantaneous-zenith', 
                      override_telescope_name='TART',
                      uvw_generator="telescope_snapshot")
 
