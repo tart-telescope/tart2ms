@@ -28,6 +28,7 @@ JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
 testms:
 	rm -rf ${MS}
 	tart2ms --json ${JSON} --ms ${MS} --telescope_name "KAT-7"
+
 disko:
 	disko --ms ${MS} --healpix --fov 155deg --res 2deg --SVG --tikhonov --alpha 0.05
 

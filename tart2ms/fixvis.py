@@ -16,6 +16,7 @@ import sys
 
 logger = logging.getLogger()
 
+
 class progress():
     def __init__(self, *args, **kwargs):
         """ Wraps a progress bar to check for TTY attachment
@@ -199,6 +200,7 @@ def synthesize_uvw(station_ECEF, time, a1, a2,
     return dict(zip(["UVW", "TIME_CENTROID", "ANTENNA1", "ANTENNA2"],
                     [padded_uvw, padded_time, padded_a1, padded_a2]))
 
+
 def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1):
     """
         Rephasor operator
@@ -222,7 +224,7 @@ def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1):
         sin = np.sin
         sqrt = np.sqrt
         ra, dec = np.deg2rad(pos)
-        ra0, dec0 = np.deg2rad(refdir[fid])        
+        ra0, dec0 = np.deg2rad(refdir[fid])
         d_ra = ra - ra0
         d_dec = dec
         d_decp = dec0
@@ -235,21 +237,20 @@ def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1):
         ll = c_d_dec * s_d_ra
         mm = (s_d_dec * c_d_decp - c_d_dec * s_d_decp * c_d_ra)
         nn = -(1 - sqrt(1 - ll * ll - mm * mm))
-    
+
         wl = np.tile((quanta.constants["c"].get_value() / freq), (nrowsel, 1))
         uvw_freq = np.zeros((nrowsel, freq.size, 3))
-        uvw_freq[:,:,0] = uvw[selfid,0].repeat(freq.size).reshape(nrowsel, freq.size) / wl
-        uvw_freq[:,:,1] = uvw[selfid,1].repeat(freq.size).reshape(nrowsel, freq.size) / wl
-        uvw_freq[:,:,2] = uvw[selfid,2].repeat(freq.size).reshape(nrowsel, freq.size) / wl
-                
-        x = np.exp(phasesign * 2.0j * np.pi * (uvw_freq[:,:,0] * ll +
-                                               uvw_freq[:,:,1] * mm +
-                                               uvw_freq[:,:,2] * nn))
+        uvw_freq[:, :, 0] = uvw[selfid, 0].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:, :, 1] = uvw[selfid, 1].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:, :, 2] = uvw[selfid, 2].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+
+        x = np.exp(phasesign * 2.0j * np.pi * (uvw_freq[:, :, 0] * ll +
+                                               uvw_freq[:, :, 1] * mm +
+                                               uvw_freq[:, :, 2] * nn))
         ncorr = vis.shape[2]
         vis[selfid, :, :] *= x.repeat(ncorr).reshape(nrowsel, freq.size, ncorr)
-    
+
     return vis
-    
 
 
 def fixms(msname, ack=True):
@@ -296,7 +297,8 @@ def fixms(msname, ack=True):
 
     logger.info("Computing UVW coordinates for output dataset... WAIT")
     new_uvw = np.zeros_like(uvw, dtype=uvw.dtype)
-    for fi in range(len(fnames)):
+    n_fields = len(fnames)
+    for fi in range(n_fields):
         fsel = field_id == fi
         padded_uvw = synthesize_uvw(station_ECEF=apos,
                                     time=time[fsel],
@@ -316,7 +318,7 @@ def fixms(msname, ack=True):
                                          ddid=ddid[fsel],
                                          padded_uvw=padded_uvw["UVW"],
                                          ack=ack)
-        logger.info("\t {} / {} fields completed".format(fi + 1, len(fnames)))
+        logger.info(f"\t {fi+1} / {n_fields} field {fnames[fi]} completed")
 
     logger.info("Writing computed UVW coordinates to output dataset")
 
