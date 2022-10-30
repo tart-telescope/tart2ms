@@ -318,7 +318,7 @@ def fixms(msname, ack=True):
                                          ddid=ddid[fsel],
                                          padded_uvw=padded_uvw["UVW"],
                                          ack=ack)
-        logger.info(f"\t {fi+1} / {n_fields} field {fnames[fi]} completed")
+        logger.info(f"\t {fi+1} / {n_fields} field {fnames[fi]} {field_stop_ctrs[fi]} completed")
 
     logger.info("Writing computed UVW coordinates to output dataset")
 
