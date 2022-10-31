@@ -481,8 +481,8 @@ def ms_create(ms_table_name, info,
 
     # will use casacore to generate these later
     if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
-        LOGGER.warn(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
-                    f"for multi-timestamp databases. Your UVW coordinates will be wrong")
+        LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
+                       f"for multi-timestamp databases. Your UVW coordinates will be wrong")
     if uvw_generator == 'telescope_snapshot':
         bl_pos = np.array(ant_pos)[baselines]
         uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
