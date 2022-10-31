@@ -34,17 +34,32 @@ if __name__ == "__main__":
                         help="Fake a second polarization. Some pipelines choke if there is only one.")
     parser.add_argument('--clobber', '-c', action="store_true",
                         help="Overwrite output ms if exists")
-    parser.add_argument('--phase_center_policy', required=False, default='instantaneous-zenith',
-                        choices=['instantaneous-zenith', 'rephase-obs-midpoint',
-                                 'no-rephase-obs-midpoint', 'rephase-SCP', 'rephase-NCP'],
-                        help="Write out a phase center per ['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint','rephase-SCP','rephase-NCP'] "
-                             "Warning: 'no-rephase-obs-midpoint' "
-                             "must be used with extreme caution and will only give valid phase tracking coordinates if the sky moves a small fraction of the "
-                             "instrument resolution (ie. should only be used for very short snapshot observations). Will by default write a field per "
-                             "integration interval in the direction of the instantaneous zenithal direction. If you want a single tracking field use "
-                             "one of the rephasing options.")
+    
+    '''
+    New CLI:    --rephase <target> Perform rephasing of _all_ input visibility snapshots (single integration visibility fields) to the specified phase center.
+                                   This does not change the number of fields that will be output. There will be one field with name J_XXXXXX per visibility integration.
+
+                --single-field     Merge all the fields into a single field with a common phase center. This means that imaging software will image just this one field by default
+                                   Useful for deep imaging.
+                                
+    Equivalents for the old --phase_center_policy CLI
+                
+                            instantaneous-zenith    : Default options. Each snapshot is a separate field
+                            rephase-obs-midpoint    : --rephase obs-midpoint --single-field
+                            no-rephase-obs-midpoint : --single-field   
+                            rephase-SCP             : --rephase SCP --single-field
+                            rephase-NCP             : --rephase NCP --single-field
+    '''
+    parser.add_argument('--rephase', required=False, default=None,
+                        choices=['obs-midpoint', 'SCP', 'NCP'],
+                        help="Rephase all visibilities to a new phase center")
+    parser.add_argument('--single-field', action="store_true",
+                        help="Write out single phase center for all observations")
+    
+    
     parser.add_argument('--telescope_name', dest="override_telescope_name", required=False, default="TART",
                         help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
+    
     ARGS = parser.parse_args()
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
@@ -54,6 +69,25 @@ if __name__ == "__main__":
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     ch.setFormatter(formatter)
     logger.addHandler(ch)
+
+    if ARGS.single_field:
+        if ARGS.rephase == "SCP":
+            phase_center_policy = "rephase-SCP"
+        elif ARGS.rephase == "NCP":
+            phase_center_policy = "rephase-NCP"
+        elif ARGS.rephase == "obs-midpoint":
+            phase_center_policy = "rephase-obs-midpoint"
+        elif ARGS.rephase is None:
+            phase_center_policy = "no-rephase-obs-midpoint"
+            print("Warning: No rephasing is being done. Use with caution.")
+            print("         The phase center will be selected as the observation midpoint. Ensure that the sky moves a small fraction")
+            print("         of the instrument resolution (ie. should only be used for very short snapshot observations")
+        else:
+            raise ValueError(f"Unknown rephase target {ARGS.rephase}")
+
+    else:  # single-field is False
+        phase_center_policy = "instantaneous-zenith"
+        
 
     if os.path.isdir(ARGS.ms):
         if not ARGS.clobber:
@@ -74,7 +108,7 @@ if __name__ == "__main__":
         print("Getting Data from file: {}".format(ARGS.json))
         print("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_json(ARGS.ms, ARGS.json, ARGS.pol2,
-                     ARGS.phase_center_policy, ARGS.override_telescope_name)
+                     phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
 
     elif ARGS.hdf:
@@ -82,7 +116,7 @@ if __name__ == "__main__":
         # Load data from a HDF5 file
         print("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2,
-                     ARGS.phase_center_policy, ARGS.override_telescope_name)
+                     phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
 
     else:
@@ -106,6 +140,6 @@ if __name__ == "__main__":
                      }
 
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, None, ARGS.pol2, ARGS.phase_center_policy,
+        ms_from_json(ARGS.ms, None, ARGS.pol2, phase_center_policy,
                      ARGS.override_telescope_name, json_data=json_data)
         print("Measurement set writing complete.")
