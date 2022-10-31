@@ -323,7 +323,8 @@ def ms_create(ms_table_name, info,
     assert direction.ndim == 3
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
-
+    
+    
     def __twelveball(direction):
         """ standardized Jhhmmss-ddmmss name """
         sc_dir = SkyCoord(direction[0]*u.rad, direction[1]*u.rad, frame='icrs')
@@ -333,11 +334,16 @@ def ms_create(ms_table_name, info,
                       f"{abs(sc_dir.dec.dms[0]):02.0f}{abs(sc_dir.dec.dms[1]):02.0f}{abs(sc_dir.dec.dms[2]):02.0f}"
         return sc_dir_repr
 
+    directions = direction.T
+    for d in directions:
+        LOGGER.info(f"    shapshot direction {d[0]}, {d[1]} {SkyCoord(d[0]*u.rad, d[1]*u.rad, frame='icrs').to_string('dms')}")
+
+
     if phase_center_policy == "instantaneous-zenith":
         pass
     elif (phase_center_policy == "no-rephase-obs-midpoint") or \
          (phase_center_policy == "rephase-obs-midpoint"):
-        direction = direction[:, :, direction.shape[2]//2].reshape(1, 2, 1)
+        direction = direction[:, :, direction.shape[2]//2].reshape(1, 2, 1)  # observation midpoint
     elif phase_center_policy == "rephase-SCP":
         direction = np.array([0, np.deg2rad(-90)]).reshape(1, 2, 1)
     elif phase_center_policy == "rephase-NCP":
