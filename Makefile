@@ -18,7 +18,7 @@ lint:
 clean:	${MS}
 	${WSCLEAN} ${MS}
 
-HDF='./test_data/vis_2022-10-30_20_36_04.286785.hdf'
+HDF='./test_data/vis_2021-03-25_20_50_23.568474.hdf'
 h5:
 	rm -rf ${MS}
 	tart2ms --hdf ${HDF} --ms ${MS}  --rephase "obs-midpoint" --single-field
