@@ -71,7 +71,7 @@ class TestTart2MS(unittest.TestCase):
 
         cal_vis, timestamp = api_imaging.vis_calibrated(self.json_data['data'][0][0],
                                                         config, gains, phase_offsets, [])
-        c = cal_vis.get_config()
+        # c = cal_vis.get_config()
 
         # We need to get the vis array to be correct for the full set of u,v,w points (baselines),
         # including the -u,-v, -w points.

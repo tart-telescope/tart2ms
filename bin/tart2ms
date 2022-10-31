@@ -17,59 +17,108 @@ from tart2ms import ms_from_json, ms_from_hdf5
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
-                                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--json', required=False, default=None, nargs="*", help="Snapshot observation JSON file (visiblities, positions and more).")
-    parser.add_argument('--hdf', required=False, default=None, nargs="*", help="Visibility hdf5 file (One minutes worth of visibility data).")
-    parser.add_argument('--ms', required=False, default='tart.ms', help="Output MS table name.")
-    parser.add_argument('--api', required=False, default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
-    parser.add_argument('--catalog', required=False, default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
-    parser.add_argument('--vis', required=False, default=None, help="Use a local JSON file containing the visibilities  for visibility data")
-    parser.add_argument('--pol2', action="store_true", help="Fake a second polarization. Some pipelines choke if there is only one.")
-    parser.add_argument('--clobber', '-c', action="store_true", help="Overwrite output ms if exists")
-    parser.add_argument('--phase_center_policy', required=False, default='instantaneous-zenith', 
-                        choices=['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint','rephase-SCP','rephase-NCP'],
-                        help="Write out a phase center per ['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint','rephase-SCP','rephase-NCP'] "
-                             "Warning: 'no-rephase-obs-midpoint' "
-                             "must be used with extreme caution and will only give valid phase tracking coordinates if the sky moves a small fraction of the "
-                             "instrument resolution (ie. should only be used for very short snapshot observations). Will by default write a field per "
-                             "integration interval in the direction of the instantaneous zenithal direction. If you want a single tracking field use "
-                             "one of the rephasing options.")
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--json', required=False, default=None, nargs="*",
+                        help="Snapshot observation JSON file (visiblities, positions and more).")
+    parser.add_argument('--hdf', required=False, default=None, nargs="*",
+                        help="Visibility hdf5 file (One minutes worth of visibility data).")
+    parser.add_argument('--ms', required=False,
+                        default='tart.ms', help="Output MS table name.")
+    parser.add_argument('--api', required=False,
+                        default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
+    parser.add_argument('--catalog', required=False,
+                        default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
+    parser.add_argument('--vis', required=False, default=None,
+                        help="Use a local JSON file containing the visibilities  for visibility data")
+    parser.add_argument('--pol2', action="store_true",
+                        help="Fake a second polarization. Some pipelines choke if there is only one.")
+    parser.add_argument('--clobber', '-c', action="store_true",
+                        help="Overwrite output ms if exists")
+    
+    '''
+    New CLI:    --rephase <target> Perform rephasing of _all_ input visibility snapshots (single integration visibility fields) to the specified phase center.
+                                   This does not change the number of fields that will be output. There will be one field with name J_XXXXXX per visibility integration.
+
+                --single-field     Merge all the fields into a single field with a common phase center. This means that imaging software will image just this one field by default
+                                   Useful for deep imaging.
+                                
+    Equivalents for the old --phase_center_policy CLI
+                
+                            instantaneous-zenith    : Default options. Each snapshot is a separate field
+                            rephase-obs-midpoint    : --rephase obs-midpoint --single-field
+                            no-rephase-obs-midpoint : --single-field   
+                            rephase-SCP             : --rephase SCP --single-field
+                            rephase-NCP             : --rephase NCP --single-field
+    '''
+    parser.add_argument('--rephase', required=False, default=None,
+                        choices=['obs-midpoint', 'SCP', 'NCP'],
+                        help="Rephase all visibilities to a new phase center")
+    parser.add_argument('--single-field', action="store_true",
+                        help="Write out single phase center for all observations")
+    
+    
     parser.add_argument('--telescope_name', dest="override_telescope_name", required=False, default="TART",
                         help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
+    
     ARGS = parser.parse_args()
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     ch.setFormatter(formatter)
     logger.addHandler(ch)
-    
+
+    if ARGS.single_field:
+        if ARGS.rephase == "SCP":
+            phase_center_policy = "rephase-SCP"
+        elif ARGS.rephase == "NCP":
+            phase_center_policy = "rephase-NCP"
+        elif ARGS.rephase == "obs-midpoint":
+            phase_center_policy = "rephase-obs-midpoint"
+        elif ARGS.rephase is None:
+            phase_center_policy = "no-rephase-obs-midpoint"
+            print("Warning: No rephasing is being done. Use with caution.")
+            print("         The phase center will be selected as the observation midpoint. Ensure that the sky moves a small fraction")
+            print("         of the instrument resolution (ie. should only be used for very short snapshot observations")
+        else:
+            raise ValueError(f"Unknown rephase target {ARGS.rephase}")
+
+    else:  # single-field is False
+        phase_center_policy = "instantaneous-zenith"
+        
+
     if os.path.isdir(ARGS.ms):
         if not ARGS.clobber:
-            raise RuntimeError("Measurement set '{}' exists. Please delete before continuing".format(ARGS.ms))
+            raise RuntimeError(
+                "Measurement set '{}' exists. Please delete before continuing".format(ARGS.ms))
         else:
             if os.path.isdir(ARGS.ms):
                 print("Clobbering '{}' per user request".format(ARGS.ms))
                 shutil.rmtree(ARGS.ms)
             else:
-                raise RuntimeError("Measurement set path '{}' exists and is not a directory. Refusing to clobber!".format(ARGS.ms))
+                raise RuntimeError(
+                    "Measurement set path '{}' exists and is not a directory. Refusing to clobber!".format(ARGS.ms))
     if ARGS.json and ARGS.hdf:
-        raise RuntimeError("At the moment can only concatenate from JSON or HDF files, not a combination of the two")
-        
+        raise RuntimeError(
+            "At the moment can only concatenate from JSON or HDF files, not a combination of the two")
+
     if ARGS.json:
-        print("Getting Data from file: {}".format(ARGS.json))    
+        print("Getting Data from file: {}".format(ARGS.json))
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, ARGS.json, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
+        ms_from_json(ARGS.ms, ARGS.json, ARGS.pol2,
+                     phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
-            
+
     elif ARGS.hdf:
         print("Getting Data from file: {}".format(ARGS.hdf))
         # Load data from a HDF5 file
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name)
+        ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2,
+                     phase_center_policy, ARGS.override_telescope_name)
         print("Measurement set writing complete.")
-            
+
     else:
         print("Getting Data from API: {}".format(ARGS.api))
         api = api_handler.APIhandler(ARGS.api)
@@ -81,15 +130,16 @@ if __name__ == "__main__":
         ts = api_imaging.vis_json_timestamp(vis_json)
 
         print("Download Complete")
-       
+
         src_json = api.get_url(api.catalog_url(config, datestr=ts.isoformat()))
 
-        json_data = {'info':info,
-                     'ant_pos':ant_pos,
+        json_data = {'info': info,
+                     'ant_pos': ant_pos,
                      'gains': gains_json,
                      'data': [[vis_json, src_json]]
-                    }
-    
+                     }
+
         print("Writing measurement set '{}'...".format(ARGS.ms))
-        ms_from_json(ARGS.ms, None, ARGS.pol2, ARGS.phase_center_policy, ARGS.override_telescope_name, json_data=json_data)
+        ms_from_json(ARGS.ms, None, ARGS.pol2, phase_center_policy,
+                     ARGS.override_telescope_name, json_data=json_data)
         print("Measurement set writing complete.")
