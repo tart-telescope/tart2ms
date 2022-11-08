@@ -30,4 +30,18 @@ def rayleigh_criterion(max_freq, baseline_lengths):
     LOGGER.info(f"\tMinimum: {min_baseline:.4f} m")
     LOGGER.info(
         f"\tMaximum: {max_baseline:.4f} m --- {max_baseline/min_wl:.4f} wavelengths")
-    return np.rad2deg(1.220 * min_wl / max_baseline)
+    return np.degrees(1.220 * min_wl / max_baseline)
+
+
+def resolution_min_baseline(max_freq, resolution_deg):
+    '''
+        Return the minimum baseline to achieve an angular resolution
+        
+        solve res_rad = 1.220 * min_wl / max_baseline to get
+        
+        max_baseline = 1.220 * min_wl / res_rad
+    '''
+    min_wl = constants.c.value / max_freq
+    res_rad = np.radians(resolution_deg)
+    
+    return 1.220 * min_wl / res_rad

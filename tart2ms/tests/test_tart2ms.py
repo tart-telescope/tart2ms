@@ -14,8 +14,8 @@ from tart.operation import settings
 from tart_tools import api_imaging
 from tart.util import constants
 
-from tart2ms import ms_from_json, ms_from_hdf5
-import disko
+from tart2ms import ms_from_json, ms_from_hdf5, read_ms
+
 
 TEST_H5 = './test_data/vis_2021-03-25_20_50_23.568474.hdf'
 TEST_JSON = 'tart2ms/tests/data_test.json'
@@ -54,11 +54,11 @@ class TestTart2MS(unittest.TestCase):
     def test_uv_equal(self):
         self.check_ms(TEST_MS)
 
-        res = disko.Resolution.from_deg(2)
+        res_deg = 2.0
 
-        u_arr, v_arr, w_arr, frequency, cv_vis, hdr, timestamp, rms_arr, indices = disko.read_ms(TEST_MS,
-                                                                                                 num_vis=552,
-                                                                                                 angular_resolution=res)
+        u_arr, v_arr, w_arr, frequency, cv_vis, hdr, timestamp, rms_arr, indices = read_ms(TEST_MS,
+                                                                                           num_vis=552,
+                                                                                           angular_resolution=res_deg)
         logger.info("U shape: {}".format(u_arr.shape))
 
         info = self.json_data['info']

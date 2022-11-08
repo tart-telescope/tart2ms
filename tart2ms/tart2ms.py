@@ -1,5 +1,5 @@
 '''
-    A quick attempt to get TART data into a measurement set.
+    Get TART data into a measurement set.
     Author: Tim Molteno, tim@elec.ac.nz
     Copyright (c) 2019-2022.
 
