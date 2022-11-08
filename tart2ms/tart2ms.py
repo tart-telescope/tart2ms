@@ -1,5 +1,5 @@
 '''
-    A quick attempt to get TART JSON data into a measurement set.
+    A quick attempt to get TART data into a measurement set.
     Author: Tim Molteno, tim@elec.ac.nz
     Copyright (c) 2019-2022.
 
@@ -29,7 +29,7 @@ from daskms import Dataset, xds_to_table
 import astropy.units as u
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, Angle
-from astropy.constants import R_earth, c as lightspeed
+from astropy.constants import R_earth
 
 
 from tart.operation import settings
@@ -42,6 +42,8 @@ from .fixvis import (fixms,
                      dense2sparse_uvw,
                      progress,
                      rephase)
+
+from .util import rayleigh_criterion
 
 LOGGER = logging.getLogger()
 
@@ -486,19 +488,12 @@ def ms_create(ms_table_name, info,
     nbl = np.unique(baselines, axis=0).shape[0]
     baseline_lengths = (da.sqrt((antenna_itrf_pos[baselines[:, 0]] -
                                  antenna_itrf_pos[baselines[:, 1]])**2)).compute()
-    max_baseline = np.max(baseline_lengths)
-    min_baseline = np.min(baseline_lengths)
-    max_freq = np.max(spw_chan_freqs)
-    min_wl = lightspeed.value / max_freq
-    # approx resolution given by first order bessel
-    # assuming array is a flat pilbox
-    reyleigh_crit = np.rad2deg(1.220 * min_wl / max_baseline)
-    LOGGER.info("Baseline lengths:")
-    LOGGER.info(f"\tMinimum: {min_baseline:.4f} m")
+    
+    rayleigh_crit = rayleigh_criterion(max_freq=np.max(spw_chan_freqs), 
+                                            baseline_lengths=baseline_lengths)
+
     LOGGER.info(
-        f"\tMaximum: {max_baseline:.4f} m --- {max_baseline/min_wl:.4f} wavelengths")
-    LOGGER.info(
-        f"Appoximate unweighted instrument resolution: {reyleigh_crit * 60.0:.4f} arcmin")
+        f"Appoximate unweighted instrument resolution: {rayleigh_crit * 60.0:.4f} arcmin")
 
     # will use casacore to generate these later
     if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
@@ -591,7 +586,7 @@ def ms_create(ms_table_name, info,
         # if we move more than say 5% of the instrument resolution during the observation
         # then warnings must be raised if we're snapping the field centre without phasing
         obs_length = np.max(epoch_s) - np.min(epoch_s)
-        snapshot_length_cutoff = reyleigh_crit / sidereal_rate * 0.05
+        snapshot_length_cutoff = rayleigh_crit / sidereal_rate * 0.05
 
         if phase_center_policy == 'no-rephase-obs-midpoint' and \
            obs_length > snapshot_length_cutoff:
@@ -601,7 +596,7 @@ def ms_create(ms_table_name, info,
                             f"incorrect UVW coordinates to be written. Do not do this unless your observation "
                             f"is short enough for sources not to move more than a fraction of the instrumental "
                             f"resolution! You are predicted to move about "
-                            f"{np.ceil(obs_length / (reyleigh_crit / sidereal_rate) * 100):.0f}% "
+                            f"{np.ceil(obs_length / (rayleigh_crit / sidereal_rate) * 100):.0f}% "
                             f"of the instrument resolution during the course of this observation")
 
         if phase_center_policy == 'rephase-obs-midpoint' or \
