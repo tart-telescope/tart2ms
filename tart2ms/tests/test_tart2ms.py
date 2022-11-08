@@ -12,7 +12,6 @@ import logging
 import numpy as np
 from tart.operation import settings
 from tart_tools import api_imaging
-from tart.util import constants
 
 from tart2ms import ms_from_json, ms_from_hdf5, read_ms
 

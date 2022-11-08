@@ -325,8 +325,7 @@ def ms_create(ms_table_name, info,
     assert direction.ndim == 3
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
-    
-    
+
     def __twelveball(direction):
         """ standardized Jhhmmss-ddmmss name """
         sc_dir = SkyCoord(direction[0]*u.rad, direction[1]*u.rad, frame='icrs')
@@ -339,7 +338,6 @@ def ms_create(ms_table_name, info,
     directions = direction.T
     for d in directions:
         LOGGER.info(f"    shapshot direction {d[0]}, {d[1]} {SkyCoord(d[0]*u.rad, d[1]*u.rad, frame='icrs').to_string('dms')}")
-
 
     if phase_center_policy == "instantaneous-zenith":
         pass
@@ -488,10 +486,9 @@ def ms_create(ms_table_name, info,
     nbl = np.unique(baselines, axis=0).shape[0]
     baseline_lengths = (da.sqrt((antenna_itrf_pos[baselines[:, 0]] -
                                  antenna_itrf_pos[baselines[:, 1]])**2)).compute()
-    
-    rayleigh_crit = rayleigh_criterion(max_freq=np.max(spw_chan_freqs), 
-                                            baseline_lengths=baseline_lengths)
 
+    rayleigh_crit = rayleigh_criterion(max_freq=np.max(spw_chan_freqs),
+                                       baseline_lengths=baseline_lengths)
     LOGGER.info(
         f"Appoximate unweighted instrument resolution: {rayleigh_crit * 60.0:.4f} arcmin")
 
