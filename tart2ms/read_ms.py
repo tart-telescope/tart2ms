@@ -144,7 +144,7 @@ def read_ms(ms, num_vis, angular_resolution, chunks=1000, channel=0,
 
                 res_limit = rayleigh_criterion(baseline_lengths=[np.max(limit_uvw)],
                                                max_freq=frequency)
-                logger.info(f"Nyquist resolution: {res_limit}")
+                logger.info(f"Nyquist resolution: {res_limit*60 :6.3f} arcmin")
 
                 if True:
                     bl = np.sqrt(uvw[:, 0] ** 2 + uvw[:, 1] ** 2 + uvw[:, 2] ** 2)

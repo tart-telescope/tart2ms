@@ -92,6 +92,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.4.0b2 Add a helper function get_array_location
 - 0.4.0b1 Add a tart2ms.read_ms function (from disko)
           Add utilities for resolution calculations.
 - 0.3.0b3 New features for keeping the phase center constant during a long measurement set (fringe phasing)
