@@ -12,7 +12,8 @@ import numpy as np
 
 from astropy import constants
 
-LOGGER = logging.getLogger()
+LOGGER = logging.getLogger("tart2ms")
+LOGGER.setLevel(logging.INFO)
 
 
 def rayleigh_criterion(max_freq, baseline_lengths):

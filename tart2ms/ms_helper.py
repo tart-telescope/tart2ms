@@ -8,8 +8,7 @@ from astropy.coordinates import SkyCoord, EarthLocation, Angle
 from casacore.tables import table
 
 
-logger = logging.getLogger(__name__)
-logging.getLogger().addHandler(logging.StreamHandler())
+logger = logging.getLogger("tart2ms")
 logger.setLevel(logging.INFO)
 
 

@@ -45,7 +45,8 @@ from .fixvis import (fixms,
 
 from .util import rayleigh_criterion
 
-LOGGER = logging.getLogger()
+LOGGER = logging.getLogger("tart2ms")
+LOGGER.setLevel(logging.INFO)
 AFRICANUS_DFT_AVAIL = True
 try:
     from africanus.rime.dask import wsclean_predict
