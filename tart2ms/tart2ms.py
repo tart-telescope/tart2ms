@@ -48,6 +48,7 @@ LOGGER = logging.getLogger()
 AFRICANUS_DFT_AVAIL = True
 try:
     from africanus.rime.dask import wsclean_predict
+    from africanus.coordinates.dask import radec_to_lm
 except ImportError:
     LOGGER.warning("Cannot import Africanus API. MODEL_DATA filling capabilities disabled")
     AFRICANUS_DFT_AVAIL = False
@@ -508,71 +509,6 @@ def ms_create(ms_table_name, info,
     LOGGER.info(
         f"Appoximate unweighted instrument resolution: {reyleigh_crit * 60.0:.4f} arcmin")
 
-    # will use casacore to generate these later
-    if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
-        LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
-                       f"for multi-timestamp databases. Your UVW coordinates will be wrong")
-    if uvw_generator == 'telescope_snapshot':
-        bl_pos = np.array(ant_pos)[baselines]
-        uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
-        # Use the - sign to get the same orientation as our tart projections.
-        uvw_array = np.array([uu_a, vv_a, ww_a]).T
-    elif uvw_generator == 'casacore':
-        # need to generate UVW coordinates for zenith positions for the model prediction step
-        # if enabled otherwise we can wait till the end (unless we rephase)
-        if phase_center_policy == 'rephase-obs-midpoint' or \
-           phase_center_policy == 'rephase-NCP' or \
-           phase_center_policy == 'rephase-SCP' or \
-           fill_model:
-            # we must first have accurate uvw coordinates in each different zenith direction
-            assert direction.ndim == 3
-            assert direction.shape[0] == 1
-            assert direction.shape[1] == 2
-            zenith_directions = np.array(
-                [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
-            zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
-                                                          zenith_directions.shape[2]).T.copy()
-            if phase_center_policy == 'rephase-obs-midpoint':
-                centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
-                    1, 2)
-            elif phase_center_policy == 'rephase-NCP':
-                centroid_direction = np.array(
-                    [0, np.deg2rad(+90)]).reshape(1, 2)
-            elif phase_center_policy == 'rephase-SCP':
-                centroid_direction = np.array(
-                    [0, np.deg2rad(-90)]).reshape(1, 2)
-            else:
-                raise RuntimeError("Invalid rephase option")
-
-            map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
-            subfields = np.unique(map_row_to_zendir)
-            assert zenith_directions.shape[0] == subfields.size
-            p = progress(
-                "Computing UVW towards original zenith points", max=subfields.size)
-            for sfi in subfields:
-                selrow = map_row_to_zendir == sfi
-                this_phase_dir = zenith_directions[sfi].reshape(1, 2)
-                padded_uvw = synthesize_uvw(station_ECEF=antenna_itrf_pos.compute(),
-                                            time=timems[selrow],
-                                            a1=baselines[:, 0][selrow],
-                                            a2=baselines[:, 1][selrow],
-                                            phase_ref=this_phase_dir,
-                                            ack=False)
-                uvw_data[selrow] = dense2sparse_uvw(a1=baselines[:, 0][selrow],
-                                                    a2=baselines[:, 1][selrow],
-                                                    time=timems[selrow],
-                                                    ddid=(
-                                                        np.ones(selrow.size)*ddid)[selrow],
-                                                    padded_uvw=padded_uvw["UVW"],
-                                                    ack=False)
-                p.next()
-        else:
-            # no model or rephasing --- we will wait to the end to fill zenith positions
-            uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
-    else:
-        raise ValueError(
-            'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
-
     for ddid, (spw_id, pol_id) in enumerate(zip(spw_ids, pol_ids)):
         # Infer row, chan and correlation shape
         row = sum(chunks['row'])
@@ -588,14 +524,12 @@ def ms_create(ms_table_name, info,
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
         for i in range(corr):
             np_data[:, :, i] = vis_array.reshape((row, chan))
-        np_uvw = uvw_array.reshape((row, 3))
-
+        
         data_chunks = tuple((chunks['row'], chan, corr))
         dask_data = da.from_array(np_data, chunks=data_chunks)
         flag_categories = da.from_array(0.05*np.ones((row, chan, corr, 1)))
         flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
-
-        uvw_data = da.from_array(np_uvw)
+        
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks['row'], dtype=np.int32)
         if np_data.shape[0] % len(epoch_s) != 0:
@@ -649,6 +583,75 @@ def ms_create(ms_table_name, info,
         # then warnings must be raised if we're snapping the field centre without phasing
         obs_length = np.max(epoch_s) - np.min(epoch_s)
         snapshot_length_cutoff = reyleigh_crit / sidereal_rate * 0.05
+        
+        if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
+            LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
+                           f"for multi-timestamp databases. Your UVW coordinates will be wrong")
+        if uvw_generator == 'telescope_snapshot':
+            bl_pos = np.array(ant_pos)[baselines]
+            uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
+            # Use the - sign to get the same orientation as our tart projections.
+            uvw_array = np.array([uu_a, vv_a, ww_a]).T
+        elif uvw_generator == 'casacore':
+            # need to generate UVW coordinates for zenith positions for the model prediction step
+            # if enabled otherwise we can wait till the end (unless we rephase)
+            if phase_center_policy == 'rephase-obs-midpoint' or \
+               phase_center_policy == 'rephase-NCP' or \
+               phase_center_policy == 'rephase-SCP' or \
+               fill_model:
+                # we must first have accurate uvw coordinates in each different zenith direction
+                assert direction.ndim == 3
+                assert direction.shape[0] == 1
+                assert direction.shape[1] == 2
+                zenith_directions = np.array(
+                    [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
+                zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
+                                                            zenith_directions.shape[2]).T.copy()
+                if phase_center_policy == 'rephase-obs-midpoint':
+                    centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
+                        1, 2)
+                elif phase_center_policy == 'rephase-NCP':
+                    centroid_direction = np.array(
+                        [0, np.deg2rad(+90)]).reshape(1, 2)
+                elif phase_center_policy == 'rephase-SCP':
+                    centroid_direction = np.array(
+                        [0, np.deg2rad(-90)]).reshape(1, 2)
+                elif phase_center_policy == "instantaneous-zenith":
+                    centroid_direction = zenith_directions
+                else:
+                    raise RuntimeError("Invalid rephase option")
+
+                map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
+                subfields = np.unique(map_row_to_zendir)
+                assert zenith_directions.shape[0] == subfields.size
+                p = progress(
+                    "Computing UVW towards original zenith points", max=subfields.size)
+                uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+                for sfi in subfields:
+                    selrow = map_row_to_zendir == sfi
+                    this_phase_dir = zenith_directions[sfi].reshape(1, 2)
+                    padded_uvw = synthesize_uvw(station_ECEF=antenna_itrf_pos.compute(),
+                                                time=timems[selrow],
+                                                a1=baselines[:, 0][selrow],
+                                                a2=baselines[:, 1][selrow],
+                                                phase_ref=this_phase_dir,
+                                                ack=False)
+                    uvw_array[selrow] = dense2sparse_uvw(a1=baselines[:, 0][selrow],
+                                                         a2=baselines[:, 1][selrow],
+                                                         time=timems[selrow],
+                                                         ddid=(
+                                                             np.ones(selrow.size)*ddid)[selrow],
+                                                         padded_uvw=padded_uvw["UVW"],
+                                                         ack=False)
+                    p.next()
+            else:
+                # no model or rephasing --- we will wait to the end to fill zenith positions
+                uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+        else:
+            raise ValueError(
+                'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
+        np_uvw = uvw_array.reshape((row, 3))
+        uvw_data = da.from_array(np_uvw)
 
         if phase_center_policy == 'no-rephase-obs-midpoint' and \
            obs_length > snapshot_length_cutoff:
@@ -660,6 +663,49 @@ def ms_create(ms_table_name, info,
                             f"resolution! You are predicted to move about "
                             f"{np.ceil(obs_length / (reyleigh_crit / sidereal_rate) * 100):.0f}% "
                             f"of the instrument resolution during the course of this observation")
+
+        if fill_model:
+            if not AFRICANUS_DFT_AVAIL:
+                raise RuntimeError("Cannot predict model visibilities. Please install codex-africanus package")
+            if sources:
+                if len(epoch_s) != len(sources):
+                    raise RuntimeError(
+                        "If sources are specified then we expected epochs to be of same size as sources list")
+                model_data = da.zeros_like(dask_data)
+                spwi_chan_freqs = da.from_array(spw_chan_freqs[spw_i])
+                for dataset_i, (epoch_s_i, sources_i) in enumerate(zip(epoch_s, sources)):
+                    # get J2000 RADEC
+                    sources_radec = np.empty((len(sources_i), 2))
+                    for src_i, src in enumerate(sources_i):
+                        name = src['name']
+                        # Convert to J2000
+                        dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime=obstime[0],
+                                            frame='altaz', location=location)
+                        dir_j2000 = dir_altaz.transform_to('fk5')
+                        sources_radec[src_i, :] = [dir_j2000.ra.radian, dir_j2000.dec.radian]
+                    # get lm cosines to sources
+                    zenith_i = zenith_directions[dataset_i]
+                    lm = radec_to_lm(sources_radec, zenith_i)
+                    source_type = np.array(["POINT"] * len(sources_i))
+                    gauss_shape = np.stack(([0.] * len(sources_i), # maj
+                                            [0.] * len(sources_i), # min
+                                            [0.] * len(sources_i)), # BPA
+                                           axis=-1)
+                    flux = np.ones(len(sources_i)) # arbitrary unitarian flux
+                    spi = np.zeros((len(sources_i), 1)) # flat spectrum
+                    reffreq = np.ones(len(sources_i)) * np.mean(spw_chan_freqs[spw_i])
+                    logspi = np.ones(len(sources_i), dtype=bool)
+                    sel = map_row_to_zendir == dataset_i
+                    vis = wsclean_predict(uvw_data[sel, :],
+                                            lm,
+                                            source_type,
+                                            flux,
+                                            spi,
+                                            logspi,
+                                            reffreq,
+                                            gauss_shape,
+                                            spwi_chan_freqs)
+                    model_data[sel, :, :] = vis
 
         if phase_center_policy == 'rephase-obs-midpoint' or \
            phase_center_policy == 'rephase-NCP' or \
@@ -684,10 +730,23 @@ def ms_create(ms_table_name, info,
                               refdir=np.rad2deg(zenith_directions),
                               field_ids=map_row_to_zendir)
             dask_data = rephased_data
+            if fill_model and sources:
+                rephased_data = \
+                    da.map_blocks(rephase,
+                                  model_data,
+                                  dtype=model_data.dtype,
+                                  chunks=model_data.chunks,
+                                  # kwargs for rephase
+                                  freq=spw_chan_freqs[spw_id],
+                                  pos=np.rad2deg(centroid_direction[0, :]),
+                                  uvw=uvw_data,
+                                  refdir=np.rad2deg(zenith_directions),
+                                  field_ids=map_row_to_zendir)
+                model_data = rephased_data
         else:
             LOGGER.info("No rephasing requested - field centers left as is")
 
-        dataset = Dataset({
+        main_table = {
             'DATA': (dims, dask_data.conj()),
             'FLAG': (dims, da.from_array(flag_data)),
             'TIME': (("row",), da.from_array(timems)),
@@ -712,7 +771,10 @@ def ms_create(ms_table_name, info,
             'ARRAY_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
             'OBSERVATION_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
             'STATE_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
-        })
+        }
+        if fill_model and sources:
+            main_table["MODEL_DATA"] = (dims, model_data)
+        dataset = Dataset(main_table)
         ms_datasets.append(dataset)
 
     ms_writes = xds_to_table(ms_datasets, ms_table_name, columns="ALL")
@@ -745,38 +807,6 @@ def ms_create(ms_table_name, info,
     else:
         raise ValueError(
             'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
-
-    if fill_model:
-        if not AFRICANUS_DFT_AVAIL:
-            raise RuntimeError("Cannot predict model visibilities. Please install codex-africanus package")
-        datasets = xds_from_ms(ms_table_name,
-                        columns=["UVW", "ANTENNA1", "ANTENNA2", "TIME"],
-                        group_cols=["FIELD_ID", "DATA_DESC_ID"],
-                        chunks={"row": 1000})
-
-        tables = support_tables(args, ["FIELD", "DATA_DESCRIPTION",
-                                "SPECTRAL_WINDOW", "POLARIZATION"])
-        field_ds = tables["FIELD"]
-        ddid_ds = tables["DATA_DESCRIPTION"]
-        spw_ds = tables["SPECTRAL_WINDOW"]
-        pol_ds = tables["POLARIZATION"]
-
-        max_num_chan = max([ss.NUM_CHAN.data[0] for ss in spw_ds])
-        max_num_corr = max([ss.NUM_CORR.data[0] for ss in pol_ds])
-        nsources = source_model.source_type.shape[0]
-        
-        for xds in datasets:
-            # Generate model visibilities
-            model_data = da.zeros_like(dask_data)
-            vis = wsclean_predict(xds.UVW.data,
-                                  lm,
-                                  source_model.source_type,
-                                  source_model.flux,
-                                  source_model.spi,
-                                  source_model.log_poly,
-                                  source_model.ref_freq,
-                                  source_model.gauss_shape,
-                                  frequency)
     
 def __print_infodict_keys(dico_info, keys, just=25):
     LOGGER.info("Observatory parameters:")

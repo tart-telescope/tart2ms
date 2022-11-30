@@ -72,7 +72,7 @@ if __name__ == "__main__":
     if ARGS.uncalibrated:
         logger.info("Raw data is being written to the database per user request")
  
-    if ARGS.single_field:
+    if ARGS.single_field or ARGS.rephase:
         if ARGS.rephase == "SCP":
             phase_center_policy = "rephase-SCP"
         elif ARGS.rephase == "NCP":
@@ -86,7 +86,6 @@ if __name__ == "__main__":
             logger.critical("         of the instrument resolution (ie. should only be used for very short snapshot observations")
         else:
             raise ValueError(f"Unknown rephase target {ARGS.rephase}")
-
     else:  # single-field is False
         phase_center_policy = "instantaneous-zenith"
         
