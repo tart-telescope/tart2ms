@@ -163,7 +163,8 @@ def ms_create(ms_table_name, info,
               phase_center_policy,
               override_telescope_name,
               uvw_generator='casacore',
-              fill_model=True):
+              fill_model=True,
+              writemodelcatalog=True):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -650,6 +651,7 @@ def ms_create(ms_table_name, info,
         else:
             raise ValueError(
                 'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
+
         np_uvw = uvw_array.reshape((row, 3))
         uvw_data = da.from_array(np_uvw)
 
@@ -667,7 +669,11 @@ def ms_create(ms_table_name, info,
         if fill_model:
             if not AFRICANUS_DFT_AVAIL:
                 raise RuntimeError("Cannot predict model visibilities. Please install codex-africanus package")
-            if sources:
+            if not sources:
+                LOGGER.critical("You have requested to predict a model for GNSS sources, however one or more of "
+                                "the databases you've provided contains no GNSS source information. The MODEL_DATA "
+                                "column of your database may be incomplete")
+            else:
                 if len(epoch_s) != len(sources):
                     raise RuntimeError(
                         "If sources are specified then we expected epochs to be of same size as sources list")
@@ -706,6 +712,14 @@ def ms_create(ms_table_name, info,
                                             gauss_shape,
                                             spwi_chan_freqs)
                     model_data[sel, :, :] = vis
+                    if writemodelcatalog:
+                        fcatname = f"model_soures_{dataset_i}.txt"
+                        LOGGER.info(f"Writing catalog '{fcatname}'")
+                        with open(fcatname, "w+") as f:
+                            f.write("#format:name ra_d dec_d i spi freq0\n")
+                            for si in range(len(sources_i)):
+                                f.write(f"SRC_{si} {np.rad2deg(sources_radec[si, 0])} "
+                                        f"{np.rad2deg(sources_radec[si, 1])} 1.0 0.0 {reffreq[si]}\n")
 
         if phase_center_policy == 'rephase-obs-midpoint' or \
            phase_center_policy == 'rephase-NCP' or \
@@ -816,7 +830,8 @@ def __print_infodict_keys(dico_info, keys, just=25):
         LOGGER.info(f"\t{reprk}: {val}")
 
 
-def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore", applycal=True):
+def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore",
+                 applycal=True, fill_model=False, writemodelcatalog=True):
     if pol2:
         pol_feeds = ['RR', 'LL']
     else:
@@ -930,11 +945,14 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
               sources=[],
               phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name,
-              uvw_generator=uvw_generator)
+              uvw_generator=uvw_generator,
+              fill_model=fill_model,
+              writemodelcatalog=writemodelcatalog)
 
 
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name,
-                 uvw_generator="casacore", json_data=None, applycal=True):
+                 uvw_generator="casacore", json_data=None, applycal=True, fill_model=False,
+                 writemodelcatalog=True):
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
@@ -1046,4 +1064,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
               pol_feeds=pol_feeds,
               sources=all_sources,
               phase_center_policy=phase_center_policy,
-              override_telescope_name=override_telescope_name, uvw_generator=uvw_generator)
+              override_telescope_name=override_telescope_name,
+              uvw_generator=uvw_generator,
+              fill_model=fill_model,
+              writemodelcatalog=writemodelcatalog)

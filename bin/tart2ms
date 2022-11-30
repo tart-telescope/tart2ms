@@ -59,6 +59,10 @@ if __name__ == "__main__":
                         help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
     parser.add_argument('--uncalibrated', dest="uncalibrated", required=False, action="store_true",
                         help="Do not apply calibration solutions (store raw data)")
+    parser.add_argument("--add-model", dest="addmodel", required=False, action="store_true",
+                        help="DFT a model of the GNSS sources into MODEL_DATA if sources are available in the input database")
+    parser.add_argument("--write-model-catalog", dest="writemodelcatalog", required=False, action="store_true",
+                        help="Write a catalog of GNSS sources in Tigger LSM format to the current path. Only of use in combination with --add-model")
     
     ARGS = parser.parse_args()
     logger = logging.getLogger()
@@ -110,7 +114,9 @@ if __name__ == "__main__":
         logger.info("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_json(ARGS.ms, ARGS.json, ARGS.pol2,
                      phase_center_policy, ARGS.override_telescope_name,
-                     applycal=not ARGS.uncalibrated)
+                     applycal=not ARGS.uncalibrated,
+                     fill_model=ARGS.addmodel,
+                     writemodelcatalog=ARGS.writemodelcatalog)
         logger.info("Measurement set writing complete.")
 
     elif ARGS.hdf:
@@ -119,7 +125,9 @@ if __name__ == "__main__":
         logger.info("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2,
                      phase_center_policy, ARGS.override_telescope_name,
-                     applycal=not ARGS.uncalibrated)
+                     applycal=not ARGS.uncalibrated,
+                     fill_model=ARGS.addmodel,
+                     writemodelcatalog=ARGS.writemodelcatalog)
         logger.info("Measurement set writing complete.")
 
     else:
@@ -145,5 +153,7 @@ if __name__ == "__main__":
         logger.info("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_json(ARGS.ms, None, ARGS.pol2, phase_center_policy,
                      ARGS.override_telescope_name, json_data=json_data,
-                     applycal=not ARGS.uncalibrated)
+                     applycal=not ARGS.uncalibrated,
+                     fill_model=ARGS.addmodel,
+                     writemodelcatalog=ARGS.writemodelcatalog)
         logger.info("Measurement set writing complete.")
