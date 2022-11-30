@@ -24,7 +24,7 @@ from casacore.quanta import quantity
 
 from astropy import coordinates as ac
 
-from daskms import Dataset, xds_to_table
+from daskms import Dataset, xds_to_table, xds_from_ms
 
 import astropy.units as u
 from astropy.time import Time
@@ -44,6 +44,13 @@ from .fixvis import (fixms,
                      rephase)
 
 LOGGER = logging.getLogger()
+
+AFRICANUS_DFT_AVAIL = True
+try:
+    from africanus.rime.dask import wsclean_predict
+except ImportError:
+    LOGGER.warning("Cannot import Africanus API. MODEL_DATA filling capabilities disabled")
+    AFRICANUS_DFT_AVAIL = False
 
 '''
 The following from Oleg Smirnov.
@@ -154,7 +161,8 @@ def ms_create(ms_table_name, info,
               sources,
               phase_center_policy,
               override_telescope_name,
-              uvw_generator='casacore'):
+              uvw_generator='casacore',
+              fill_model=True):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -510,8 +518,57 @@ def ms_create(ms_table_name, info,
         # Use the - sign to get the same orientation as our tart projections.
         uvw_array = np.array([uu_a, vv_a, ww_a]).T
     elif uvw_generator == 'casacore':
-        # to be fixed with our fixvis casacore generator at the end
-        uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+        # need to generate UVW coordinates for zenith positions for the model prediction step
+        # if enabled otherwise we can wait till the end (unless we rephase)
+        if phase_center_policy == 'rephase-obs-midpoint' or \
+           phase_center_policy == 'rephase-NCP' or \
+           phase_center_policy == 'rephase-SCP' or \
+           fill_model:
+            # we must first have accurate uvw coordinates in each different zenith direction
+            assert direction.ndim == 3
+            assert direction.shape[0] == 1
+            assert direction.shape[1] == 2
+            zenith_directions = np.array(
+                [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
+            zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
+                                                          zenith_directions.shape[2]).T.copy()
+            if phase_center_policy == 'rephase-obs-midpoint':
+                centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
+                    1, 2)
+            elif phase_center_policy == 'rephase-NCP':
+                centroid_direction = np.array(
+                    [0, np.deg2rad(+90)]).reshape(1, 2)
+            elif phase_center_policy == 'rephase-SCP':
+                centroid_direction = np.array(
+                    [0, np.deg2rad(-90)]).reshape(1, 2)
+            else:
+                raise RuntimeError("Invalid rephase option")
+
+            map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
+            subfields = np.unique(map_row_to_zendir)
+            assert zenith_directions.shape[0] == subfields.size
+            p = progress(
+                "Computing UVW towards original zenith points", max=subfields.size)
+            for sfi in subfields:
+                selrow = map_row_to_zendir == sfi
+                this_phase_dir = zenith_directions[sfi].reshape(1, 2)
+                padded_uvw = synthesize_uvw(station_ECEF=antenna_itrf_pos.compute(),
+                                            time=timems[selrow],
+                                            a1=baselines[:, 0][selrow],
+                                            a2=baselines[:, 1][selrow],
+                                            phase_ref=this_phase_dir,
+                                            ack=False)
+                uvw_data[selrow] = dense2sparse_uvw(a1=baselines[:, 0][selrow],
+                                                    a2=baselines[:, 1][selrow],
+                                                    time=timems[selrow],
+                                                    ddid=(
+                                                        np.ones(selrow.size)*ddid)[selrow],
+                                                    padded_uvw=padded_uvw["UVW"],
+                                                    ack=False)
+                p.next()
+        else:
+            # no model or rephasing --- we will wait to the end to fill zenith positions
+            uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
     else:
         raise ValueError(
             'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
@@ -607,48 +664,6 @@ def ms_create(ms_table_name, info,
         if phase_center_policy == 'rephase-obs-midpoint' or \
            phase_center_policy == 'rephase-NCP' or \
            phase_center_policy == 'rephase-SCP':
-            # we must first have accurate uvw coordinates in each different zenith direction
-            assert direction.ndim == 3
-            assert direction.shape[0] == 1
-            assert direction.shape[1] == 2
-            zenith_directions = np.array(
-                [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
-            zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
-                                                          zenith_directions.shape[2]).T.copy()
-            if phase_center_policy == 'rephase-obs-midpoint':
-                centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
-                    1, 2)
-            elif phase_center_policy == 'rephase-NCP':
-                centroid_direction = np.array(
-                    [0, np.deg2rad(+90)]).reshape(1, 2)
-            elif phase_center_policy == 'rephase-SCP':
-                centroid_direction = np.array(
-                    [0, np.deg2rad(-90)]).reshape(1, 2)
-            else:
-                raise RuntimeError("Invalid rephase option")
-
-            map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
-            subfields = np.unique(map_row_to_zendir)
-            assert zenith_directions.shape[0] == subfields.size
-            p = progress(
-                "Computing UVW towards original zenith points", max=subfields.size)
-            for sfi in subfields:
-                selrow = map_row_to_zendir == sfi
-                this_phase_dir = zenith_directions[sfi].reshape(1, 2)
-                padded_uvw = synthesize_uvw(station_ECEF=antenna_itrf_pos.compute(),
-                                            time=timems[selrow],
-                                            a1=baselines[:, 0][selrow],
-                                            a2=baselines[:, 1][selrow],
-                                            phase_ref=this_phase_dir,
-                                            ack=False)
-                uvw_data[selrow] = dense2sparse_uvw(a1=baselines[:, 0][selrow],
-                                                    a2=baselines[:, 1][selrow],
-                                                    time=timems[selrow],
-                                                    ddid=(
-                                                        np.ones(selrow.size)*ddid)[selrow],
-                                                    padded_uvw=padded_uvw["UVW"],
-                                                    ack=False)
-                p.next()
             new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
                                      frame='icrs')
             new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
@@ -657,7 +672,6 @@ def ms_create(ms_table_name, info,
             LOGGER.info(
                 f"Per user request: Rephase all data to {new_phase_dir_repr}")
             rephased_data = da.empty_like(dask_data)
-
             rephased_data = \
                 da.map_blocks(rephase,
                               dask_data,
@@ -720,12 +734,50 @@ def ms_create(ms_table_name, info,
     if uvw_generator == 'telescope_snapshot':
         pass
     elif uvw_generator == 'casacore':
-        fixms(ms_table_name)
+        # rephasing requires us to tilt w towards the rephased point on the sphere
+        # this is also needed if we haven't generated zenithal points yet because we didn't predict
+        # a model
+        if phase_center_policy == 'rephase-obs-midpoint' or \
+           phase_center_policy == 'rephase-NCP' or \
+           phase_center_policy == 'rephase-SCP' or \
+           not fill_model:
+            fixms(ms_table_name)
     else:
         raise ValueError(
             'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
 
+    if fill_model:
+        if not AFRICANUS_DFT_AVAIL:
+            raise RuntimeError("Cannot predict model visibilities. Please install codex-africanus package")
+        datasets = xds_from_ms(ms_table_name,
+                        columns=["UVW", "ANTENNA1", "ANTENNA2", "TIME"],
+                        group_cols=["FIELD_ID", "DATA_DESC_ID"],
+                        chunks={"row": 1000})
 
+        tables = support_tables(args, ["FIELD", "DATA_DESCRIPTION",
+                                "SPECTRAL_WINDOW", "POLARIZATION"])
+        field_ds = tables["FIELD"]
+        ddid_ds = tables["DATA_DESCRIPTION"]
+        spw_ds = tables["SPECTRAL_WINDOW"]
+        pol_ds = tables["POLARIZATION"]
+
+        max_num_chan = max([ss.NUM_CHAN.data[0] for ss in spw_ds])
+        max_num_corr = max([ss.NUM_CORR.data[0] for ss in pol_ds])
+        nsources = source_model.source_type.shape[0]
+        
+        for xds in datasets:
+            # Generate model visibilities
+            model_data = da.zeros_like(dask_data)
+            vis = wsclean_predict(xds.UVW.data,
+                                  lm,
+                                  source_model.source_type,
+                                  source_model.flux,
+                                  source_model.spi,
+                                  source_model.log_poly,
+                                  source_model.ref_freq,
+                                  source_model.gauss_shape,
+                                  frequency)
+    
 def __print_infodict_keys(dico_info, keys, just=25):
     LOGGER.info("Observatory parameters:")
     for k in keys:
@@ -734,7 +786,7 @@ def __print_infodict_keys(dico_info, keys, just=25):
         LOGGER.info(f"\t{reprk}: {val}")
 
 
-def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore"):
+def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore", applycal=True):
     if pol2:
         pol_feeds = ['RR', 'LL']
     else:
@@ -819,6 +871,9 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 vis.phase_az = hdf_phase_elaz[1]
 
                 cal_vis = calibration.CalibratedVisibility(vis)
+                if not applycal:
+                    gains[...] = 1.0
+                    phases[...] = 0.0
                 cal_vis.set_gain(np.arange(24), gains)
                 cal_vis.set_phase_offset(np.arange(24), phases)
 
@@ -849,7 +904,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
 
 
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name,
-                 uvw_generator="casacore", json_data=None):
+                 uvw_generator="casacore", json_data=None, applycal=True):
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
@@ -878,8 +933,11 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         info = jdi['info']
         ant_pos = jdi['ant_pos']
         config = settings.from_api_json(info['info'], ant_pos)
-        gains = jdi['gains']['gain']
-        phases = jdi['gains']['phase_offset']
+        gains = np.array(jdi['gains']['gain'])
+        phases = np.array(jdi['gains']['phase_offset'])
+        if not applycal:
+            gains[...] = 1.0
+            phases[...] = 0.0
         if ant_pos_orig is None:
             ant_pos_orig = ant_pos.copy()
         if not np.isclose(ant_pos_orig, ant_pos).all():
