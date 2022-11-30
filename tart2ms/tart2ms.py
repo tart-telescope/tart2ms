@@ -1,5 +1,5 @@
 '''
-    A quick attempt to get TART JSON data into a measurement set.
+    Get TART data into a measurement set.
     Author: Tim Molteno, tim@elec.ac.nz
     Copyright (c) 2019-2022.
 
@@ -43,8 +43,9 @@ from .fixvis import (fixms,
                      progress,
                      rephase)
 
-LOGGER = logging.getLogger()
+from .util import rayleigh_criterion
 
+LOGGER = logging.getLogger()
 AFRICANUS_DFT_AVAIL = True
 try:
     from africanus.rime.dask import wsclean_predict
@@ -333,8 +334,7 @@ def ms_create(ms_table_name, info,
     assert direction.ndim == 3
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
-    
-    
+
     def __twelveball(direction):
         """ standardized Jhhmmss-ddmmss name """
         sc_dir = SkyCoord(direction[0]*u.rad, direction[1]*u.rad, frame='icrs')
@@ -347,7 +347,6 @@ def ms_create(ms_table_name, info,
     directions = direction.T
     for d in directions:
         LOGGER.info(f"    shapshot direction {d[0]}, {d[1]} {SkyCoord(d[0]*u.rad, d[1]*u.rad, frame='icrs').to_string('dms')}")
-
 
     if phase_center_policy == "instantaneous-zenith":
         pass
@@ -496,19 +495,27 @@ def ms_create(ms_table_name, info,
     nbl = np.unique(baselines, axis=0).shape[0]
     baseline_lengths = (da.sqrt((antenna_itrf_pos[baselines[:, 0]] -
                                  antenna_itrf_pos[baselines[:, 1]])**2)).compute()
-    max_baseline = np.max(baseline_lengths)
-    min_baseline = np.min(baseline_lengths)
-    max_freq = np.max(spw_chan_freqs)
-    min_wl = lightspeed.value / max_freq
-    # approx resolution given by first order bessel
-    # assuming array is a flat pilbox
-    reyleigh_crit = np.rad2deg(1.220 * min_wl / max_baseline)
-    LOGGER.info("Baseline lengths:")
-    LOGGER.info(f"\tMinimum: {min_baseline:.4f} m")
+
+    rayleigh_crit = rayleigh_criterion(max_freq=np.max(spw_chan_freqs),
+                                       baseline_lengths=baseline_lengths)
     LOGGER.info(
-        f"\tMaximum: {max_baseline:.4f} m --- {max_baseline/min_wl:.4f} wavelengths")
-    LOGGER.info(
-        f"Appoximate unweighted instrument resolution: {reyleigh_crit * 60.0:.4f} arcmin")
+        f"Appoximate unweighted instrument resolution: {rayleigh_crit * 60.0:.4f} arcmin")
+
+    # will use casacore to generate these later
+    if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
+        LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
+                       f"for multi-timestamp databases. Your UVW coordinates will be wrong")
+    if uvw_generator == 'telescope_snapshot':
+        bl_pos = np.array(ant_pos)[baselines]
+        uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
+        # Use the - sign to get the same orientation as our tart projections.
+        uvw_array = np.array([uu_a, vv_a, ww_a]).T
+    elif uvw_generator == 'casacore':
+        # to be fixed with our fixvis casacore generator at the end
+        uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+    else:
+        raise ValueError(
+            'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
 
     for ddid, (spw_id, pol_id) in enumerate(zip(spw_ids, pol_ids)):
         # Infer row, chan and correlation shape
@@ -583,7 +590,7 @@ def ms_create(ms_table_name, info,
         # if we move more than say 5% of the instrument resolution during the observation
         # then warnings must be raised if we're snapping the field centre without phasing
         obs_length = np.max(epoch_s) - np.min(epoch_s)
-        snapshot_length_cutoff = reyleigh_crit / sidereal_rate * 0.05
+        snapshot_length_cutoff = rayleigh_crit / sidereal_rate * 0.05
         
         if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
             LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
@@ -663,7 +670,7 @@ def ms_create(ms_table_name, info,
                             f"incorrect UVW coordinates to be written. Do not do this unless your observation "
                             f"is short enough for sources not to move more than a fraction of the instrumental "
                             f"resolution! You are predicted to move about "
-                            f"{np.ceil(obs_length / (reyleigh_crit / sidereal_rate) * 100):.0f}% "
+                            f"{np.ceil(obs_length / (rayleigh_crit / sidereal_rate) * 100):.0f}% "
                             f"of the instrument resolution during the course of this observation")
 
         if fill_model:
