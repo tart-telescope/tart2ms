@@ -167,7 +167,8 @@ def ms_create(ms_table_name, info,
               override_telescope_name,
               uvw_generator='casacore',
               fill_model=True,
-              writemodelcatalog=True):
+              writemodelcatalog=True,
+              sources_timestamps=None):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -210,8 +211,12 @@ def ms_create(ms_table_name, info,
     LOGGER.info(f"\tLat {lat}")
     LOGGER.info(f"\tLon {lon}")
     LOGGER.info(f"\tAlt {height}")
-
+    # by default SOURCES (usually GNSS) come from the same json database
+    # but we could forseeably load them in (or augment) separately in the future
+    if sources_timestamps is None:
+        sources_timestamps = timestamps
     epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
+    epoch_s_sources = list(map(timestamp_to_ms_epoch, sources_timestamps))
     LOGGER.debug(f"Time {epoch_s}")
     LOGGER.info(f"Min time: {np.min(timestamps)} -- {np.min(epoch_s)}")
     LOGGER.info(f"Max time: {np.max(timestamps)} -- {np.max(epoch_s)}")
@@ -226,6 +231,7 @@ def ms_create(ms_table_name, info,
                                            height=loc['alt']*u.m,
                                            ellipsoid='WGS84')
     obstime = Time(timestamps)
+    sources_obstime = Time(sources_timestamps)
     LOGGER.debug(f"obstime {obstime}")
 
     # local_frame = AltAz(obstime=obstime, location=location)
@@ -393,15 +399,17 @@ def ms_create(ms_table_name, info,
 
     # ----------------------------- SOURCE datasets -------------------------- #
     if sources:
-        if len(epoch_s) != len(sources):
+        if len(epoch_s_sources) != len(sources):
             raise RuntimeError(
                 "If sources are specified then we expected epochs to be of same size as sources list")
-        for database_i, (epoch_s_i, sources_i) in enumerate(zip(epoch_s, sources)):
+        for database_i, (epoch_s_i, sources_i) in enumerate(zip(epoch_s_sources, sources)):
             for src in sources_i:
                 name = src['name']
                 # Convert to J2000
-                direction_src = azel2radec(az=src['az'], el=src['el'], 
-                                           location=location, obstime=obstime[database_i])
+                direction_src = azel2radec(az=src['az'],
+                                           el=src['el'], 
+                                           location=location,
+                                           obstime=sources_obstime[database_i])
                 LOGGER.debug(
                     f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}")
                 # , 1, dtype=np.int32)
@@ -681,19 +689,25 @@ def ms_create(ms_table_name, info,
                                 "the databases you've provided contains no GNSS source information. The MODEL_DATA "
                                 "column of your database may be incomplete")
             else:
-                if len(epoch_s) != len(sources):
+                if len(epoch_s_sources) != len(sources):
                     raise RuntimeError(
                         "If sources are specified then we expected epochs to be of same size as sources list")
                 model_data = da.zeros_like(dask_data)
                 spwi_chan_freqs = da.from_array(spw_chan_freqs[spw_i])
-                for dataset_i, (epoch_s_i, sources_i) in enumerate(zip(epoch_s, sources)):
+                for dataset_i, data_epoch_i in enumerate(epoch_s):
+                    # predict closest matching source catalog epoch
+                    nn_source_epoch = np.argmin(abs(np.array(epoch_s_sources) - data_epoch_i))
+                    epoch_s_i = epoch_s_sources[nn_source_epoch]
+                    sources_i = sources[nn_source_epoch]
+                    LOGGER.info(f"Predicting model for source catalog epoch {epoch_s_i:.2f} for data epoch "
+                                f"{data_epoch_i:.2f} (temporal difference: {abs(epoch_s_i - data_epoch_i):.2f} s)")
                     # get J2000 RADEC
                     sources_radec = np.empty((len(sources_i), 2))
                     for src_i, src in enumerate(sources_i):
                         name = src['name']
                         # Convert to J2000
                         direction_src = azel2radec(az=src['az'], el=src['el'], 
-                                                   location=location, obstime=obstime[database_i])
+                                                   location=location, obstime=sources_obstime[nn_source_epoch])
                         sources_radec[src_i, :] = direction_src
                     # get lm cosines to sources
                     zenith_i = zenith_directions[dataset_i]
@@ -719,7 +733,7 @@ def ms_create(ms_table_name, info,
                                             spwi_chan_freqs)
                     model_data[sel, :, :] = vis
                     if writemodelcatalog:
-                        fcatname = f"model_soures_{dataset_i}.txt"
+                        fcatname = f"model_sources_{dataset_i}.txt"
                         LOGGER.info(f"Writing catalog '{fcatname}'")
                         with open(fcatname, "w+") as f:
                             f.write("#format:name ra_d dec_d i spi freq0\n")
