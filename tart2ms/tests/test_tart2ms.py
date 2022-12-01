@@ -102,3 +102,15 @@ class TestTart2MS(unittest.TestCase):
                      uvw_generator="telescope_snapshot")
 
         self.assertTrue(True)
+
+    def test_model_predict(self, test_ms="test_json_with_model.ms"):
+        shutil.rmtree(test_ms, ignore_errors=True)
+        ms_from_json(test_ms, TEST_JSON, pol2=False,
+                     phase_center_policy='instantaneous-zenith',
+                     override_telescope_name='TART',
+                     uvw_generator="casacore",
+                     fill_model=True,
+                     writemodelcatalog=True)
+        from pyrap.tables import table as tbl
+        with tbl(test_ms) as tt:
+            self.assertTrue("MODEL_DATA" in tt.colnames())
