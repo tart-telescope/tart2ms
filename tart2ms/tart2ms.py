@@ -44,6 +44,7 @@ from .fixvis import (fixms,
                      rephase)
 
 from .util import rayleigh_criterion
+from .ms_helper import azel2radec
 
 LOGGER = logging.getLogger("tart2ms")
 LOGGER.setLevel(logging.INFO)
@@ -395,14 +396,12 @@ def ms_create(ms_table_name, info,
         if len(epoch_s) != len(sources):
             raise RuntimeError(
                 "If sources are specified then we expected epochs to be of same size as sources list")
-        for epoch_s_i, sources_i in zip(epoch_s, sources):
+        for database_i, (epoch_s_i, sources_i) in enumerate(zip(epoch_s, sources)):
             for src in sources_i:
                 name = src['name']
                 # Convert to J2000
-                dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime=obstime[0],
-                                     frame='altaz', location=location)
-                dir_j2000 = dir_altaz.transform_to('fk5')
-                direction_src = [dir_j2000.ra.radian, dir_j2000.dec.radian]
+                direction_src = azel2radec(az=src['az'], el=src['el'], 
+                                           location=location, obstime=obstime[database_i])
                 LOGGER.debug(
                     f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}")
                 # , 1, dtype=np.int32)
@@ -693,10 +692,9 @@ def ms_create(ms_table_name, info,
                     for src_i, src in enumerate(sources_i):
                         name = src['name']
                         # Convert to J2000
-                        dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime=obstime[0],
-                                            frame='altaz', location=location)
-                        dir_j2000 = dir_altaz.transform_to('fk5')
-                        sources_radec[src_i, :] = [dir_j2000.ra.radian, dir_j2000.dec.radian]
+                        direction_src = azel2radec(az=src['az'], el=src['el'], 
+                                                   location=location, obstime=obstime[database_i])
+                        sources_radec[src_i, :] = direction_src
                     # get lm cosines to sources
                     zenith_i = zenith_directions[dataset_i]
                     lm = radec_to_lm(sources_radec, zenith_i)

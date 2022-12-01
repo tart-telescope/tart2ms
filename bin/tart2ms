@@ -14,6 +14,7 @@ from tart_tools import api_imaging
 from tart.operation import settings
 
 from tart2ms import ms_from_json, ms_from_hdf5
+from datetime import datetime as dt
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
@@ -73,6 +74,17 @@ if __name__ == "__main__":
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     ch.setFormatter(formatter)
     logger.addHandler(ch)
+    fileHandler = logging.FileHandler(filename=f"tart2ms.{dt.now().timestamp()}.log")
+    fileHandler.setFormatter(formatter)
+    fileHandler.setLevel(level=logging.INFO)
+    logger.addHandler(fileHandler)
+
+    logger.info("TART2MS parameters:")
+    for k in vars(ARGS).keys():
+        val = getattr(ARGS, k, "Information Unavailable")
+        reprk = str(k).ljust(20, " ")
+        logger.info(f"\t{reprk}: {val}")
+
     if ARGS.uncalibrated:
         logger.info("Raw data is being written to the database per user request")
  
