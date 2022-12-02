@@ -781,7 +781,7 @@ def ms_create(ms_table_name, info,
             LOGGER.info("No rephasing requested - field centers left as is")
 
         main_table = {
-            'DATA': (dims, dask_data.conj()),
+            'DATA': (dims, dask_data),
             'FLAG': (dims, da.from_array(flag_data)),
             'TIME': (("row",), da.from_array(timems)),
             'TIME_CENTROID': ("row", da.from_array(timems)),
