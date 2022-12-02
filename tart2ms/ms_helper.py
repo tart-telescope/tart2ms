@@ -78,8 +78,9 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                         f"{data_epoch_i:.2f} (temporal difference: {abs(epoch_s_i - data_epoch_i):.2f} s)")
             # get J2000 RADEC
             sources_radec = np.empty((len(sources_i), 2))
+            names = []
             for src_i, src in enumerate(sources_i):
-                name = src['name']
+                names.append(src['name'].replace(" ", "_"))
                 # Convert to J2000
                 direction_src = azel2radec(az=src['az'], el=src['el'], 
                                             location=location, obstime=sources_obstime[nn_source_epoch])
@@ -114,7 +115,7 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
             with open(fcatname, "w+") as f:
                 f.write("#format:name ra_d dec_d i spi freq0\n")
                 for si in range(len(sources_i)):
-                    f.write(f"SRC_{si} {np.rad2deg(sources_radec[si, 0])} "
+                    f.write(f"{names[si]} {np.rad2deg(sources_radec[si, 0])} "
                             f"{np.rad2deg(sources_radec[si, 1])} 1.0 0.0 {reffreq[si]}\n")
 
         return model_data
