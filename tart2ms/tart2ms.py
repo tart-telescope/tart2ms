@@ -603,6 +603,14 @@ def ms_create(ms_table_name, info,
         if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
             LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
                            f"for multi-timestamp databases. Your UVW coordinates will be wrong")
+        assert direction.ndim == 3
+        assert direction.shape[0] == 1
+        assert direction.shape[1] == 2
+        zenith_directions = np.array(
+            [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
+        zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
+                                                    zenith_directions.shape[2]).T.copy()
+        map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
         if uvw_generator == 'telescope_snapshot':
             bl_pos = np.array(ant_pos)[baselines]
             uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
@@ -616,13 +624,6 @@ def ms_create(ms_table_name, info,
                phase_center_policy == 'rephase-SCP' or \
                fill_model:
                 # we must first have accurate uvw coordinates in each different zenith direction
-                assert direction.ndim == 3
-                assert direction.shape[0] == 1
-                assert direction.shape[1] == 2
-                zenith_directions = np.array(
-                    [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
-                zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
-                                                            zenith_directions.shape[2]).T.copy()
                 if phase_center_policy == 'rephase-obs-midpoint':
                     centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
                         1, 2)
@@ -637,7 +638,6 @@ def ms_create(ms_table_name, info,
                 else:
                     raise RuntimeError("Invalid rephase option")
 
-                map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
                 subfields = np.unique(map_row_to_zendir)
                 assert zenith_directions.shape[0] == subfields.size
                 p = progress(
