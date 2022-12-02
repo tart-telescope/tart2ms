@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import dask.array as da
+import re
 
 from astropy.coordinates import SkyCoord, EarthLocation, Angle
 from astropy import units as u
@@ -55,7 +56,9 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                   map_row_to_zendir,
                   location,
                   sources, epoch_s_sources, sources_obstime,
-                  writemodelcatalog):
+                  writemodelcatalog,
+                  filter_elevation=45.,
+                  filter_name=r"(?:^GPS.*)|(?:^QZS.*)"):
     if not AFRICANUS_DFT_AVAIL:
         raise RuntimeError("Cannot predict model visibilities. Please install codex-africanus package")
     if not sources:
@@ -73,7 +76,11 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
             # predict closest matching source catalog epoch
             nn_source_epoch = np.argmin(abs(np.array(epoch_s_sources) - data_epoch_i))
             epoch_s_i = epoch_s_sources[nn_source_epoch]
-            sources_i = sources[nn_source_epoch]
+            sources_i = list(filter(lambda s: s['el'] >= filter_elevation and
+                                              re.findall(filter_name, s['name']), 
+                                    sources[nn_source_epoch]))
+            if not sources_i:
+                continue
             logger.info(f"Predicting model for source catalog epoch {epoch_s_i:.2f} for data epoch "
                         f"{data_epoch_i:.2f} (temporal difference: {abs(epoch_s_i - data_epoch_i):.2f} s)")
             # get J2000 RADEC
@@ -109,13 +116,13 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                                     spwi_chan_freqs)
             model_data[sel, :, :] = vis
 
-        if writemodelcatalog:
-            fcatname = f"model_sources_{dataset_i}.txt"
-            logger.info(f"Writing catalog '{fcatname}'")
-            with open(fcatname, "w+") as f:
-                f.write("#format:name ra_d dec_d i spi freq0\n")
-                for si in range(len(sources_i)):
-                    f.write(f"{names[si]} {np.rad2deg(sources_radec[si, 0])} "
-                            f"{np.rad2deg(sources_radec[si, 1])} 1.0 0.0 {reffreq[si]}\n")
+            if writemodelcatalog:
+                fcatname = f"model_sources_{dataset_i}.txt"
+                logger.info(f"Writing catalog '{fcatname}'")
+                with open(fcatname, "w+") as f:
+                    f.write("#format:name ra_d dec_d i spi freq0\n")
+                    for si in range(len(sources_i)):
+                        f.write(f"{names[si]} {np.rad2deg(sources_radec[si, 0])} "
+                                f"{np.rad2deg(sources_radec[si, 1])} 1.0 0.0 {reffreq[si]}\n")
 
         return model_data
