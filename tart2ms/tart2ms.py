@@ -44,17 +44,10 @@ from .fixvis import (fixms,
                      rephase)
 
 from .util import rayleigh_criterion
-from .ms_helper import azel2radec
+from .ms_helper import azel2radec, predict_model
 
 LOGGER = logging.getLogger("tart2ms")
 LOGGER.setLevel(logging.INFO)
-AFRICANUS_DFT_AVAIL = True
-try:
-    from africanus.rime.dask import wsclean_predict
-    from africanus.coordinates.dask import radec_to_lm
-except ImportError:
-    LOGGER.warning("Cannot import Africanus API. MODEL_DATA filling capabilities disabled")
-    AFRICANUS_DFT_AVAIL = False
 
 '''
 The following from Oleg Smirnov.
@@ -682,64 +675,14 @@ def ms_create(ms_table_name, info,
                             f"of the instrument resolution during the course of this observation")
 
         if fill_model:
-            if not AFRICANUS_DFT_AVAIL:
-                raise RuntimeError("Cannot predict model visibilities. Please install codex-africanus package")
-            if not sources:
-                LOGGER.critical("You have requested to predict a model for GNSS sources, however one or more of "
-                                "the databases you've provided contains no GNSS source information. The MODEL_DATA "
-                                "column of your database may be incomplete")
-            else:
-                if len(epoch_s_sources) != len(sources):
-                    raise RuntimeError(
-                        "If sources are specified then we expected epochs to be of same size as sources list")
-                model_data = da.zeros_like(dask_data)
-                spwi_chan_freqs = da.from_array(spw_chan_freqs[spw_i])
-                for dataset_i, data_epoch_i in enumerate(epoch_s):
-                    # predict closest matching source catalog epoch
-                    nn_source_epoch = np.argmin(abs(np.array(epoch_s_sources) - data_epoch_i))
-                    epoch_s_i = epoch_s_sources[nn_source_epoch]
-                    sources_i = sources[nn_source_epoch]
-                    LOGGER.info(f"Predicting model for source catalog epoch {epoch_s_i:.2f} for data epoch "
-                                f"{data_epoch_i:.2f} (temporal difference: {abs(epoch_s_i - data_epoch_i):.2f} s)")
-                    # get J2000 RADEC
-                    sources_radec = np.empty((len(sources_i), 2))
-                    for src_i, src in enumerate(sources_i):
-                        name = src['name']
-                        # Convert to J2000
-                        direction_src = azel2radec(az=src['az'], el=src['el'], 
-                                                   location=location, obstime=sources_obstime[nn_source_epoch])
-                        sources_radec[src_i, :] = direction_src
-                    # get lm cosines to sources
-                    zenith_i = zenith_directions[dataset_i]
-                    lm = radec_to_lm(sources_radec, zenith_i)
-                    source_type = np.array(["POINT"] * len(sources_i))
-                    gauss_shape = np.stack(([0.] * len(sources_i), # maj
-                                            [0.] * len(sources_i), # min
-                                            [0.] * len(sources_i)), # BPA
-                                           axis=-1)
-                    flux = np.ones(len(sources_i)) # arbitrary unitarian flux
-                    spi = np.zeros((len(sources_i), 1)) # flat spectrum
-                    reffreq = np.ones(len(sources_i)) * np.mean(spw_chan_freqs[spw_i])
-                    logspi = np.ones(len(sources_i), dtype=bool)
-                    sel = map_row_to_zendir == dataset_i
-                    vis = wsclean_predict(uvw_data[sel, :],
-                                            lm,
-                                            source_type,
-                                            flux,
-                                            spi,
-                                            logspi,
-                                            reffreq,
-                                            gauss_shape,
-                                            spwi_chan_freqs)
-                    model_data[sel, :, :] = vis
-                    if writemodelcatalog:
-                        fcatname = f"model_sources_{dataset_i}.txt"
-                        LOGGER.info(f"Writing catalog '{fcatname}'")
-                        with open(fcatname, "w+") as f:
-                            f.write("#format:name ra_d dec_d i spi freq0\n")
-                            for si in range(len(sources_i)):
-                                f.write(f"SRC_{si} {np.rad2deg(sources_radec[si, 0])} "
-                                        f"{np.rad2deg(sources_radec[si, 1])} 1.0 0.0 {reffreq[si]}\n")
+            model_data = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+                                       uvw_data,
+                                       epoch_s, spw_chan_freqs, spw_i,
+                                       zenith_directions,
+                                       map_row_to_zendir,
+                                       location,
+                                       sources, epoch_s_sources, sources_obstime,
+                                       writemodelcatalog)
 
         if phase_center_policy == 'rephase-obs-midpoint' or \
            phase_center_policy == 'rephase-NCP' or \
