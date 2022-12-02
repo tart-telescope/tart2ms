@@ -108,7 +108,7 @@ class TestTart2MS(unittest.TestCase):
         ms_from_json(test_ms, TEST_JSON, pol2=False,
                      phase_center_policy='instantaneous-zenith',
                      override_telescope_name='TART',
-                     uvw_generator="casacore",
+                     uvw_generator="telescope_snapshot",
                      fill_model=True,
                      writemodelcatalog=True)
         from pyrap.tables import table as tbl
