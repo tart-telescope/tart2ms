@@ -18,6 +18,7 @@ import dask.array as da
 import numpy as np
 import time
 import os
+import re
 from hashlib import sha256
 
 from itertools import product
@@ -798,7 +799,10 @@ def __print_infodict_keys(dico_info, keys, just=25):
         reprk = str(k).ljust(just, " ")
         LOGGER.info(f"\t{reprk}: {val}")
 
-def __fetch_sources(timestamps, observer_lat, observer_lon, retry=5, retry_time=1, force_recache=False):    
+def __fetch_sources(timestamps, observer_lat, observer_lon, 
+                    retry=5, retry_time=1, force_recache=False, 
+                    filter_elevation=45.,
+                    filter_name=r"(?:^GPS.*)|(?:^QZS.*)"):    
     cache_dir = os.path.join(".", ".tartcache")
     if not os.path.exists(cache_dir):
         os.mkdir(cache_dir)
@@ -831,7 +835,10 @@ def __fetch_sources(timestamps, observer_lat, observer_lon, retry=5, retry_time=
                 LOGGER.warning(f"\tRetry '{cat_url}'")
 
         if nretry < 0:
-            sources.append(source_json)
+            this_t_sources = source_json
+            sources.append(list(filter(lambda s: s.get('el', -90) >= filter_elevation and
+                                    re.findall(filter_name, s.get('name', 'NULLPTR')), 
+                                this_t_sources)))
             with open(cache_file, "w+") as f:
                 json.dump(source_json, f)
         else:
