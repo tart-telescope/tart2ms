@@ -76,10 +76,18 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
             # predict closest matching source catalog epoch
             nn_source_epoch = np.argmin(abs(np.array(epoch_s_sources) - data_epoch_i))
             epoch_s_i = epoch_s_sources[nn_source_epoch]
-            sources_i = list(filter(lambda s: s['el'] >= filter_elevation and
-                                              re.findall(filter_name, s['name']), 
+            if sources[nn_source_epoch] is None:
+                logger.critical("You have requested to predict a model for GNSS sources, however one or more of "
+                                "the databases you've provided contains no GNSS source information. The MODEL_DATA "
+                                "column of your database may be incomplete")
+                continue
+            sources_i = list(filter(lambda s: s.get('el', -90) >= filter_elevation and
+                                              re.findall(filter_name, s.get('name', 'NULLPTR')), 
                                     sources[nn_source_epoch]))
             if not sources_i:
+                logger.critical("You have requested to predict a model for GNSS sources, however one or more of "
+                                "the databases you've provided contains no GNSS source information. The MODEL_DATA "
+                                "column of your database may be incomplete")
                 continue
             logger.info(f"Predicting model for source catalog epoch {epoch_s_i:.2f} for data epoch "
                         f"{data_epoch_i:.2f} (temporal difference: {abs(epoch_s_i - data_epoch_i):.2f} s)")

@@ -16,7 +16,9 @@ import dateutil
 
 import dask.array as da
 import numpy as np
-
+import time
+import os
+from hashlib import sha256
 
 from itertools import product
 
@@ -34,9 +36,12 @@ from astropy.constants import R_earth, c as lightspeed
 
 from tart.operation import settings
 from tart.imaging.visibility import Visibility
-from tart.imaging import calibration
+from tart.imaging import (calibration,
+                          elaz)
 
-from tart_tools import api_imaging
+from tart_tools import (api_imaging,
+                        api_handler)
+
 from .fixvis import (fixms,
                      synthesize_uvw,
                      dense2sparse_uvw,
@@ -396,6 +401,7 @@ def ms_create(ms_table_name, info,
             raise RuntimeError(
                 "If sources are specified then we expected epochs to be of same size as sources list")
         for database_i, (epoch_s_i, sources_i) in enumerate(zip(epoch_s_sources, sources)):
+            if sources_i is None: continue
             for src in sources_i:
                 name = src['name']
                 # Convert to J2000
@@ -792,9 +798,51 @@ def __print_infodict_keys(dico_info, keys, just=25):
         reprk = str(k).ljust(just, " ")
         LOGGER.info(f"\t{reprk}: {val}")
 
+def __fetch_sources(timestamps, observer_lat, observer_lon, retry=5, retry_time=1, force_recache=False):    
+    cache_dir = os.path.join(".", ".tartcache")
+    if not os.path.exists(cache_dir):
+        os.mkdir(cache_dir)
+    api = api_handler.APIhandler("")
+    LOGGER.info("Going online to retrieve updated GNSS TLS")
+    ncache_objs = 0
+    sources = []
+    for tt in timestamps:
+        nretry = 0
+        cat_url = api.catalog_url(lon=observer_lon,
+                                  lat=observer_lat,
+                                  datestr=tt.isoformat())
+        cache_file = os.path.join(cache_dir,
+                                  sha256(cat_url.encode()).hexdigest())
+        if not force_recache:
+            if os.path.exists(cache_file):
+                nretry = -1
+                with open(cache_file) as f:
+                    source_json = json.load(f)
+                ncache_objs += 1    
+        while nretry < retry and nretry >= 0:
+            try:
+                source_json = api.get_url(cat_url)
+                if not isinstance(source_json, list):
+                    raise RuntimeError("JSON source list should be a list. Please report this as TART API bug")
+                nretry = -1
+            except:
+                nretry += 1
+                time.sleep(retry_time)
+                LOGGER.warning(f"\tRetry '{cat_url}'")
+
+        if nretry < 0:
+            sources.append(source_json)
+            with open(cache_file, "w+") as f:
+                json.dump(source_json, f)
+        else:
+            LOGGER.critical(f"Failed to retrieve GNSS TLS from '{cat_url}'. "
+                            f"Source information will be unavailable and prediction will not return a useful model")
+            return None
+    LOGGER.info(f"GNSS source catalogs retrieved for {len(timestamps)} timestamps, {ncache_objs} from local cache")
+    return sources
 
 def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore",
-                 applycal=True, fill_model=False, writemodelcatalog=True):
+                 applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False):
     if pol2:
         pol_feeds = ['RR', 'LL']
     else:
@@ -811,6 +859,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
         LOGGER.info(f"\t '{h5}'")
 
     p = progress("Processing HDF database", max=len(h5file))
+    all_sources = []
     for ih5, h5 in enumerate(h5file):
         with h5py.File(h5, "r") as h5f:
             config_string = np.string_(h5f['config'][0]).decode('UTF-8')
@@ -840,7 +889,6 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
             if orig_dico_info is None:
                 orig_dico_info = config_json
             config_same = True
-
             for check_key in ["L0_frequency", "bandwidth", "baseband_frequency",
                               "num_antenna", "operating_frequency", "sampling_frequency",
                               "lat", "lon", "alt", "orientation", "axes"]:
@@ -871,7 +919,6 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
             timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
 
             hdf_vis = h5f['vis'][:]
-
             for ts, v in zip(timestamps, hdf_vis):
                 vis = Visibility(config=config, timestamp=ts)
                 vis.set_visibilities(v=v, b=hdf_baselines.tolist())
@@ -892,6 +939,16 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 for bl in baselines:
                     all_baselines.append(bl)
                 all_times.append(ts)
+            if fetch_sources:
+                lat = config_json.get("lat", None)
+                lon = config_json.get("lon", None)
+                if lat is None or lon is None:
+                    raise RuntimeError("Telescope location is unavailable from the provided databases")
+                online_sources = __fetch_sources(timestamps=timestamps, 
+                                                 observer_lat=lat,
+                                                 observer_lon=lon,
+                                                 force_recache=catalog_recache) 
+                all_sources += online_sources if online_sources is not None else [None] * len(timestamps)
         p.next()
 
     LOGGER.info("<Done>")
@@ -905,7 +962,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
               baselines=all_baselines,
               timestamps=all_times,
               pol_feeds=pol_feeds,
-              sources=[],
+              sources=all_sources,
               phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name,
               uvw_generator=uvw_generator,
@@ -915,7 +972,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
 
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name,
                  uvw_generator="casacore", json_data=None, applycal=True, fill_model=False,
-                 writemodelcatalog=True):
+                 writemodelcatalog=True, fetch_sources=True, catalog_recache=False):
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
@@ -962,7 +1019,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         opt_keys = ["lat", "lon", "alt", "orientation", "axes"]
         for check_key in ["L0_frequency", "bandwidth", "baseband_frequency",
                           "num_antenna", "operating_frequency", "sampling_frequency",
-                          "lat", "lon", "alt", "orientation", "axes"]:
+                          "lat", "lon", "alt", "orientation", "axes", "location"]:
             if check_key not in info["info"] or check_key not in orig_dico_info:
                 if check_key not in opt_keys:
                     raise RuntimeError(
@@ -995,7 +1052,18 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
             vis_json, source_json = d
             cal_vis, timestamp = api_imaging.vis_calibrated(
                 vis_json, config, gains, phases, [])
-            src_list = source_json
+            if fetch_sources:
+                lat = info["info"]["location"].get("lat", info["info"].get("lat", None))
+                lon = info["info"]["location"].get("lon", info["info"].get("lon", None))
+                if lat is None or lon is None:
+                    raise RuntimeError("Telescope location is unavailable from the provided databases")
+                online_list = __fetch_sources(timestamps=[timestamp], 
+                                              observer_lat=lat,
+                                              observer_lon=lon,
+                                              force_recache=catalog_recache)
+                src_list = source_json if not online_list else online_list[0]
+            else:
+                src_list = source_json
             # a list of sources per timestamp so we can zip them correctly
             all_sources.append(src_list)
         if pol2:
