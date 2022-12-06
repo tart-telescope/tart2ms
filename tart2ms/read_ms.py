@@ -19,10 +19,10 @@ from daskms import xds_from_table, xds_from_ms
 
 from .util import resolution_min_baseline, rayleigh_criterion
 
-logger = logging.getLogger(__name__)
-logger.addHandler(
-    logging.NullHandler()
-)  # Add other handlers if you're using this as a library
+logger = logging.getLogger("tart2ms")
+# logger.addHandler(
+#     logging.NullHandler()
+# )  # Add other handlers if you're using this as a library
 logger.setLevel(logging.INFO)
 
 
