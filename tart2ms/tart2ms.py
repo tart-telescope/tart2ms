@@ -16,7 +16,10 @@ import dateutil
 
 import dask.array as da
 import numpy as np
-
+import time
+import os
+import re
+from hashlib import sha256
 
 from itertools import product
 
@@ -24,19 +27,22 @@ from casacore.quanta import quantity
 
 from astropy import coordinates as ac
 
-from daskms import Dataset, xds_to_table
+from daskms import Dataset, xds_to_table, xds_from_ms
 
 import astropy.units as u
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, EarthLocation, Angle
-from astropy.constants import R_earth
+from astropy.constants import R_earth, c as lightspeed
 
 
 from tart.operation import settings
 from tart.imaging.visibility import Visibility
-from tart.imaging import calibration
+from tart.imaging import (calibration,
+                          elaz)
 
-from tart_tools import api_imaging
+from tart_tools import (api_imaging,
+                        api_handler)
+
 from .fixvis import (fixms,
                      synthesize_uvw,
                      dense2sparse_uvw,
@@ -44,8 +50,10 @@ from .fixvis import (fixms,
                      rephase)
 
 from .util import rayleigh_criterion
+from .ms_helper import azel2radec, predict_model
 
-LOGGER = logging.getLogger()
+LOGGER = logging.getLogger("tart2ms")
+LOGGER.setLevel(logging.INFO)
 
 '''
 The following from Oleg Smirnov.
@@ -156,7 +164,10 @@ def ms_create(ms_table_name, info,
               sources,
               phase_center_policy,
               override_telescope_name,
-              uvw_generator='casacore'):
+              uvw_generator='casacore',
+              fill_model=True,
+              writemodelcatalog=True,
+              sources_timestamps=None):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -199,8 +210,12 @@ def ms_create(ms_table_name, info,
     LOGGER.info(f"\tLat {lat}")
     LOGGER.info(f"\tLon {lon}")
     LOGGER.info(f"\tAlt {height}")
-
+    # by default SOURCES (usually GNSS) come from the same json database
+    # but we could forseeably load them in (or augment) separately in the future
+    if sources_timestamps is None:
+        sources_timestamps = timestamps
     epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
+    epoch_s_sources = list(map(timestamp_to_ms_epoch, sources_timestamps))
     LOGGER.debug(f"Time {epoch_s}")
     LOGGER.info(f"Min time: {np.min(timestamps)} -- {np.min(epoch_s)}")
     LOGGER.info(f"Max time: {np.max(timestamps)} -- {np.max(epoch_s)}")
@@ -215,6 +230,7 @@ def ms_create(ms_table_name, info,
                                            height=loc['alt']*u.m,
                                            ellipsoid='WGS84')
     obstime = Time(timestamps)
+    sources_obstime = Time(sources_timestamps)
     LOGGER.debug(f"obstime {obstime}")
 
     # local_frame = AltAz(obstime=obstime, location=location)
@@ -382,17 +398,18 @@ def ms_create(ms_table_name, info,
 
     # ----------------------------- SOURCE datasets -------------------------- #
     if sources:
-        if len(epoch_s) != len(sources):
+        if len(epoch_s_sources) != len(sources):
             raise RuntimeError(
                 "If sources are specified then we expected epochs to be of same size as sources list")
-        for epoch_s_i, sources_i in zip(epoch_s, sources):
+        for database_i, (epoch_s_i, sources_i) in enumerate(zip(epoch_s_sources, sources)):
+            if sources_i is None: continue
             for src in sources_i:
                 name = src['name']
                 # Convert to J2000
-                dir_altaz = SkyCoord(alt=src['el']*u.deg, az=src['az']*u.deg, obstime=obstime[0],
-                                     frame='altaz', location=location)
-                dir_j2000 = dir_altaz.transform_to('fk5')
-                direction_src = [dir_j2000.ra.radian, dir_j2000.dec.radian]
+                direction_src = azel2radec(az=src['az'],
+                                           el=src['el'], 
+                                           location=location,
+                                           obstime=sources_obstime[database_i])
                 LOGGER.debug(
                     f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}")
                 # , 1, dtype=np.int32)
@@ -523,14 +540,12 @@ def ms_create(ms_table_name, info,
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
         for i in range(corr):
             np_data[:, :, i] = vis_array.reshape((row, chan))
-        np_uvw = uvw_array.reshape((row, 3))
-
+        
         data_chunks = tuple((chunks['row'], chan, corr))
         dask_data = da.from_array(np_data, chunks=data_chunks)
         flag_categories = da.from_array(0.05*np.ones((row, chan, corr, 1)))
         flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
-
-        uvw_data = da.from_array(np_uvw)
+        
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks['row'], dtype=np.int32)
         if np_data.shape[0] % len(epoch_s) != 0:
@@ -584,6 +599,76 @@ def ms_create(ms_table_name, info,
         # then warnings must be raised if we're snapping the field centre without phasing
         obs_length = np.max(epoch_s) - np.min(epoch_s)
         snapshot_length_cutoff = rayleigh_crit / sidereal_rate * 0.05
+        
+        if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
+            LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
+                           f"for multi-timestamp databases. Your UVW coordinates will be wrong")
+        assert direction.ndim == 3
+        assert direction.shape[0] == 1
+        assert direction.shape[1] == 2
+        zenith_directions = np.array(
+            [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
+        zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
+                                                    zenith_directions.shape[2]).T.copy()
+        map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
+        if uvw_generator == 'telescope_snapshot':
+            bl_pos = np.array(ant_pos)[baselines]
+            uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
+            # Use the - sign to get the same orientation as our tart projections.
+            uvw_array = np.array([uu_a, vv_a, ww_a]).T
+        elif uvw_generator == 'casacore':
+            # need to generate UVW coordinates for zenith positions for the model prediction step
+            # if enabled otherwise we can wait till the end (unless we rephase)
+            if phase_center_policy == 'rephase-obs-midpoint' or \
+               phase_center_policy == 'rephase-NCP' or \
+               phase_center_policy == 'rephase-SCP' or \
+               fill_model:
+                # we must first have accurate uvw coordinates in each different zenith direction
+                if phase_center_policy == 'rephase-obs-midpoint':
+                    centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
+                        1, 2)
+                elif phase_center_policy == 'rephase-NCP':
+                    centroid_direction = np.array(
+                        [0, np.deg2rad(+90)]).reshape(1, 2)
+                elif phase_center_policy == 'rephase-SCP':
+                    centroid_direction = np.array(
+                        [0, np.deg2rad(-90)]).reshape(1, 2)
+                elif phase_center_policy == "instantaneous-zenith":
+                    centroid_direction = zenith_directions
+                else:
+                    raise RuntimeError("Invalid rephase option")
+
+                subfields = np.unique(map_row_to_zendir)
+                assert zenith_directions.shape[0] == subfields.size
+                p = progress(
+                    "Computing UVW towards original zenith points", max=subfields.size)
+                uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+                for sfi in subfields:
+                    selrow = map_row_to_zendir == sfi
+                    this_phase_dir = zenith_directions[sfi].reshape(1, 2)
+                    padded_uvw = synthesize_uvw(station_ECEF=antenna_itrf_pos.compute(),
+                                                time=timems[selrow],
+                                                a1=baselines[:, 0][selrow],
+                                                a2=baselines[:, 1][selrow],
+                                                phase_ref=this_phase_dir,
+                                                ack=False)
+                    uvw_array[selrow] = dense2sparse_uvw(a1=baselines[:, 0][selrow],
+                                                         a2=baselines[:, 1][selrow],
+                                                         time=timems[selrow],
+                                                         ddid=(
+                                                             np.ones(selrow.size)*ddid)[selrow],
+                                                         padded_uvw=padded_uvw["UVW"],
+                                                         ack=False)
+                    p.next()
+            else:
+                # no model or rephasing --- we will wait to the end to fill zenith positions
+                uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+        else:
+            raise ValueError(
+                'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
+
+        np_uvw = uvw_array.reshape((row, 3))
+        uvw_data = da.from_array(np_uvw)
 
         if phase_center_policy == 'no-rephase-obs-midpoint' and \
            obs_length > snapshot_length_cutoff:
@@ -596,51 +681,19 @@ def ms_create(ms_table_name, info,
                             f"{np.ceil(obs_length / (rayleigh_crit / sidereal_rate) * 100):.0f}% "
                             f"of the instrument resolution during the course of this observation")
 
+        if fill_model:
+            model_data = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+                                       uvw_data,
+                                       epoch_s, spw_chan_freqs, spw_i,
+                                       zenith_directions,
+                                       map_row_to_zendir,
+                                       location,
+                                       sources, epoch_s_sources, sources_obstime,
+                                       writemodelcatalog)
+
         if phase_center_policy == 'rephase-obs-midpoint' or \
            phase_center_policy == 'rephase-NCP' or \
            phase_center_policy == 'rephase-SCP':
-            # we must first have accurate uvw coordinates in each different zenith direction
-            assert direction.ndim == 3
-            assert direction.shape[0] == 1
-            assert direction.shape[1] == 2
-            zenith_directions = np.array(
-                [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
-            zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
-                                                          zenith_directions.shape[2]).T.copy()
-            if phase_center_policy == 'rephase-obs-midpoint':
-                centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
-                    1, 2)
-            elif phase_center_policy == 'rephase-NCP':
-                centroid_direction = np.array(
-                    [0, np.deg2rad(+90)]).reshape(1, 2)
-            elif phase_center_policy == 'rephase-SCP':
-                centroid_direction = np.array(
-                    [0, np.deg2rad(-90)]).reshape(1, 2)
-            else:
-                raise RuntimeError("Invalid rephase option")
-
-            map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
-            subfields = np.unique(map_row_to_zendir)
-            assert zenith_directions.shape[0] == subfields.size
-            p = progress(
-                "Computing UVW towards original zenith points", max=subfields.size)
-            for sfi in subfields:
-                selrow = map_row_to_zendir == sfi
-                this_phase_dir = zenith_directions[sfi].reshape(1, 2)
-                padded_uvw = synthesize_uvw(station_ECEF=antenna_itrf_pos.compute(),
-                                            time=timems[selrow],
-                                            a1=baselines[:, 0][selrow],
-                                            a2=baselines[:, 1][selrow],
-                                            phase_ref=this_phase_dir,
-                                            ack=False)
-                uvw_data[selrow] = dense2sparse_uvw(a1=baselines[:, 0][selrow],
-                                                    a2=baselines[:, 1][selrow],
-                                                    time=timems[selrow],
-                                                    ddid=(
-                                                        np.ones(selrow.size)*ddid)[selrow],
-                                                    padded_uvw=padded_uvw["UVW"],
-                                                    ack=False)
-                p.next()
             new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
                                      frame='icrs')
             new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
@@ -649,7 +702,6 @@ def ms_create(ms_table_name, info,
             LOGGER.info(
                 f"Per user request: Rephase all data to {new_phase_dir_repr}")
             rephased_data = da.empty_like(dask_data)
-
             rephased_data = \
                 da.map_blocks(rephase,
                               dask_data,
@@ -662,11 +714,24 @@ def ms_create(ms_table_name, info,
                               refdir=np.rad2deg(zenith_directions),
                               field_ids=map_row_to_zendir)
             dask_data = rephased_data
+            if fill_model and sources:
+                rephased_data = \
+                    da.map_blocks(rephase,
+                                  model_data,
+                                  dtype=model_data.dtype,
+                                  chunks=model_data.chunks,
+                                  # kwargs for rephase
+                                  freq=spw_chan_freqs[spw_id],
+                                  pos=np.rad2deg(centroid_direction[0, :]),
+                                  uvw=uvw_data,
+                                  refdir=np.rad2deg(zenith_directions),
+                                  field_ids=map_row_to_zendir)
+                model_data = rephased_data
         else:
             LOGGER.info("No rephasing requested - field centers left as is")
 
-        dataset = Dataset({
-            'DATA': (dims, dask_data.conj()),
+        main_table = {
+            'DATA': (dims, dask_data),
             'FLAG': (dims, da.from_array(flag_data)),
             'TIME': (("row",), da.from_array(timems)),
             'TIME_CENTROID': ("row", da.from_array(timems)),
@@ -690,7 +755,10 @@ def ms_create(ms_table_name, info,
             'ARRAY_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
             'OBSERVATION_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
             'STATE_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
-        })
+        }
+        if fill_model and sources:
+            main_table["MODEL_DATA"] = (dims, model_data)
+        dataset = Dataset(main_table)
         ms_datasets.append(dataset)
 
     ms_writes = xds_to_table(ms_datasets, ms_table_name, columns="ALL")
@@ -712,12 +780,18 @@ def ms_create(ms_table_name, info,
     if uvw_generator == 'telescope_snapshot':
         pass
     elif uvw_generator == 'casacore':
-        fixms(ms_table_name)
+        # rephasing requires us to tilt w towards the rephased point on the sphere
+        # this is also needed if we haven't generated zenithal points yet because we didn't predict
+        # a model
+        if phase_center_policy == 'rephase-obs-midpoint' or \
+           phase_center_policy == 'rephase-NCP' or \
+           phase_center_policy == 'rephase-SCP' or \
+           not fill_model:
+            fixms(ms_table_name)
     else:
         raise ValueError(
             'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
-
-
+    
 def __print_infodict_keys(dico_info, keys, just=25):
     LOGGER.info("Observatory parameters:")
     for k in keys:
@@ -725,8 +799,57 @@ def __print_infodict_keys(dico_info, keys, just=25):
         reprk = str(k).ljust(just, " ")
         LOGGER.info(f"\t{reprk}: {val}")
 
+def __fetch_sources(timestamps, observer_lat, observer_lon, 
+                    retry=5, retry_time=1, force_recache=False, 
+                    filter_elevation=45.,
+                    filter_name=r"(?:^GPS.*)|(?:^QZS.*)"):    
+    cache_dir = os.path.join(".", ".tartcache")
+    if not os.path.exists(cache_dir):
+        os.mkdir(cache_dir)
+    api = api_handler.APIhandler("")
+    LOGGER.info("Going online to retrieve updated GNSS TLS")
+    ncache_objs = 0
+    sources = []
+    for tt in timestamps:
+        nretry = 0
+        cat_url = api.catalog_url(lon=observer_lon,
+                                  lat=observer_lat,
+                                  datestr=tt.isoformat())
+        cache_file = os.path.join(cache_dir,
+                                  sha256(cat_url.encode()).hexdigest())
+        if not force_recache:
+            if os.path.exists(cache_file):
+                nretry = -1
+                with open(cache_file) as f:
+                    source_json = json.load(f)
+                ncache_objs += 1    
+        while nretry < retry and nretry >= 0:
+            try:
+                source_json = api.get_url(cat_url)
+                if not isinstance(source_json, list):
+                    raise RuntimeError("JSON source list should be a list. Please report this as TART API bug")
+                nretry = -1
+            except:
+                nretry += 1
+                time.sleep(retry_time)
+                LOGGER.warning(f"\tRetry '{cat_url}'")
 
-def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore"):
+        if nretry < 0:
+            this_t_sources = source_json
+            sources.append(list(filter(lambda s: s.get('el', -90) >= filter_elevation and
+                                    re.findall(filter_name, s.get('name', 'NULLPTR')), 
+                                this_t_sources)))
+            with open(cache_file, "w+") as f:
+                json.dump(source_json, f)
+        else:
+            LOGGER.critical(f"Failed to retrieve GNSS TLS from '{cat_url}'. "
+                            f"Source information will be unavailable and prediction will not return a useful model")
+            return None
+    LOGGER.info(f"GNSS source catalogs retrieved for {len(timestamps)} timestamps, {ncache_objs} from local cache")
+    return sources
+
+def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore",
+                 applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False):
     if pol2:
         pol_feeds = ['RR', 'LL']
     else:
@@ -743,6 +866,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
         LOGGER.info(f"\t '{h5}'")
 
     p = progress("Processing HDF database", max=len(h5file))
+    all_sources = []
     for ih5, h5 in enumerate(h5file):
         with h5py.File(h5, "r") as h5f:
             config_string = np.string_(h5f['config'][0]).decode('UTF-8')
@@ -772,7 +896,6 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
             if orig_dico_info is None:
                 orig_dico_info = config_json
             config_same = True
-
             for check_key in ["L0_frequency", "bandwidth", "baseband_frequency",
                               "num_antenna", "operating_frequency", "sampling_frequency",
                               "lat", "lon", "alt", "orientation", "axes"]:
@@ -803,7 +926,6 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
             timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
 
             hdf_vis = h5f['vis'][:]
-
             for ts, v in zip(timestamps, hdf_vis):
                 vis = Visibility(config=config, timestamp=ts)
                 vis.set_visibilities(v=v, b=hdf_baselines.tolist())
@@ -811,6 +933,9 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 vis.phase_az = hdf_phase_elaz[1]
 
                 cal_vis = calibration.CalibratedVisibility(vis)
+                if not applycal:
+                    gains[...] = 1.0
+                    phases[...] = 0.0
                 cal_vis.set_gain(np.arange(24), gains)
                 cal_vis.set_phase_offset(np.arange(24), phases)
 
@@ -821,6 +946,16 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 for bl in baselines:
                     all_baselines.append(bl)
                 all_times.append(ts)
+            if fetch_sources:
+                lat = config_json.get("lat", None)
+                lon = config_json.get("lon", None)
+                if lat is None or lon is None:
+                    raise RuntimeError("Telescope location is unavailable from the provided databases")
+                online_sources = __fetch_sources(timestamps=timestamps, 
+                                                 observer_lat=lat,
+                                                 observer_lon=lon,
+                                                 force_recache=catalog_recache) 
+                all_sources += online_sources if online_sources is not None else [None] * len(timestamps)
         p.next()
 
     LOGGER.info("<Done>")
@@ -834,14 +969,17 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
               baselines=all_baselines,
               timestamps=all_times,
               pol_feeds=pol_feeds,
-              sources=[],
+              sources=all_sources,
               phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name,
-              uvw_generator=uvw_generator)
+              uvw_generator=uvw_generator,
+              fill_model=fill_model,
+              writemodelcatalog=writemodelcatalog)
 
 
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name,
-                 uvw_generator="casacore", json_data=None):
+                 uvw_generator="casacore", json_data=None, applycal=True, fill_model=False,
+                 writemodelcatalog=True, fetch_sources=True, catalog_recache=False):
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
@@ -870,8 +1008,11 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         info = jdi['info']
         ant_pos = jdi['ant_pos']
         config = settings.from_api_json(info['info'], ant_pos)
-        gains = jdi['gains']['gain']
-        phases = jdi['gains']['phase_offset']
+        gains = np.array(jdi['gains']['gain'])
+        phases = np.array(jdi['gains']['phase_offset'])
+        if not applycal:
+            gains[...] = 1.0
+            phases[...] = 0.0
         if ant_pos_orig is None:
             ant_pos_orig = ant_pos.copy()
         if not np.isclose(ant_pos_orig, ant_pos).all():
@@ -885,7 +1026,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         opt_keys = ["lat", "lon", "alt", "orientation", "axes"]
         for check_key in ["L0_frequency", "bandwidth", "baseband_frequency",
                           "num_antenna", "operating_frequency", "sampling_frequency",
-                          "lat", "lon", "alt", "orientation", "axes"]:
+                          "lat", "lon", "alt", "orientation", "axes", "location"]:
             if check_key not in info["info"] or check_key not in orig_dico_info:
                 if check_key not in opt_keys:
                     raise RuntimeError(
@@ -918,7 +1059,18 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
             vis_json, source_json = d
             cal_vis, timestamp = api_imaging.vis_calibrated(
                 vis_json, config, gains, phases, [])
-            src_list = source_json
+            if fetch_sources:
+                lat = info["info"]["location"].get("lat", info["info"].get("lat", None))
+                lon = info["info"]["location"].get("lon", info["info"].get("lon", None))
+                if lat is None or lon is None:
+                    raise RuntimeError("Telescope location is unavailable from the provided databases")
+                online_list = __fetch_sources(timestamps=[timestamp], 
+                                              observer_lat=lat,
+                                              observer_lon=lon,
+                                              force_recache=catalog_recache)
+                src_list = source_json if not online_list else online_list[0]
+            else:
+                src_list = source_json
             # a list of sources per timestamp so we can zip them correctly
             all_sources.append(src_list)
         if pol2:
@@ -950,4 +1102,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
               pol_feeds=pol_feeds,
               sources=all_sources,
               phase_center_policy=phase_center_policy,
-              override_telescope_name=override_telescope_name, uvw_generator=uvw_generator)
+              override_telescope_name=override_telescope_name,
+              uvw_generator=uvw_generator,
+              fill_model=fill_model,
+              writemodelcatalog=writemodelcatalog)

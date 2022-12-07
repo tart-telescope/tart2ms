@@ -14,6 +14,7 @@ from tart_tools import api_imaging
 from tart.operation import settings
 
 from tart2ms import ms_from_json, ms_from_hdf5
+from datetime import datetime as dt
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
@@ -54,23 +55,44 @@ if __name__ == "__main__":
                         choices=['obs-midpoint', 'SCP', 'NCP'],
                         help="Rephase all visibilities to a new phase center")
     parser.add_argument('--single-field', action="store_true",
-                        help="Write out single phase center for all observations")
-    
-    
+                        help="Write out single phase center for all observations")   
     parser.add_argument('--telescope_name', dest="override_telescope_name", required=False, default="TART",
                         help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
+    parser.add_argument('--uncalibrated', dest="uncalibrated", required=False, action="store_true",
+                        help="Do not apply calibration solutions (store raw data)")
+    parser.add_argument("--add-model", dest="addmodel", required=False, action="store_true",
+                        help="DFT a model of the GNSS sources into MODEL_DATA if sources are available in the input database")
+    parser.add_argument("--write-model-catalog", dest="writemodelcatalog", required=False, action="store_true",
+                        help="Write a catalog of GNSS sources in Tigger LSM format to the current path. Only of use in combination with --add-model")
+    parser.add_argument("--skip-online-source-catalog", dest="no_fetch_sources", required=False, action="store_true",
+                        help="Skips fetching a catalog of GNSS sources online (not recommended for HDF5 based loading)")
+    parser.add_argument("--no-cache", dest="sources_recache", required=False, action="store_true",
+                        help="Ignores GNSS sources already cached from a previous run")
     
     ARGS = parser.parse_args()
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
+    logger = logging.getLogger("tart2ms")
+    logger.setLevel(logging.INFO)
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     ch.setFormatter(formatter)
     logger.addHandler(ch)
+    fileHandler = logging.FileHandler(filename=f"tart2ms.{dt.now().timestamp()}.log")
+    fileHandler.setFormatter(formatter)
+    fileHandler.setLevel(level=logging.INFO)
+    logger.addHandler(fileHandler)
 
-    if ARGS.single_field:
+    logger.info("TART2MS parameters:")
+    for k in vars(ARGS).keys():
+        val = getattr(ARGS, k, "Information Unavailable")
+        reprk = str(k).ljust(20, " ")
+        logger.info(f"\t{reprk}: {val}")
+
+    if ARGS.uncalibrated:
+        logger.info("Raw data is being written to the database per user request")
+ 
+    if ARGS.single_field or ARGS.rephase:
         if ARGS.rephase == "SCP":
             phase_center_policy = "rephase-SCP"
         elif ARGS.rephase == "NCP":
@@ -79,12 +101,11 @@ if __name__ == "__main__":
             phase_center_policy = "rephase-obs-midpoint"
         elif ARGS.rephase is None:
             phase_center_policy = "no-rephase-obs-midpoint"
-            print("Warning: No rephasing is being done. Use with caution.")
-            print("         The phase center will be selected as the observation midpoint. Ensure that the sky moves a small fraction")
-            print("         of the instrument resolution (ie. should only be used for very short snapshot observations")
+            logger.critical("Warning: No rephasing is being done. Use with caution.")
+            logger.critical("         The phase center will be selected as the observation midpoint. Ensure that the sky moves a small fraction")
+            logger.critical("         of the instrument resolution (ie. should only be used for very short snapshot observations")
         else:
             raise ValueError(f"Unknown rephase target {ARGS.rephase}")
-
     else:  # single-field is False
         phase_center_policy = "instantaneous-zenith"
         
@@ -95,7 +116,7 @@ if __name__ == "__main__":
                 "Measurement set '{}' exists. Please delete before continuing".format(ARGS.ms))
         else:
             if os.path.isdir(ARGS.ms):
-                print("Clobbering '{}' per user request".format(ARGS.ms))
+                logger.info("Clobbering '{}' per user request".format(ARGS.ms))
                 shutil.rmtree(ARGS.ms)
             else:
                 raise RuntimeError(
@@ -105,22 +126,32 @@ if __name__ == "__main__":
             "At the moment can only concatenate from JSON or HDF files, not a combination of the two")
 
     if ARGS.json:
-        print("Getting Data from file: {}".format(ARGS.json))
-        print("Writing measurement set '{}'...".format(ARGS.ms))
+        logger.info("Getting Data from file: {}".format(ARGS.json))
+        logger.info("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_json(ARGS.ms, ARGS.json, ARGS.pol2,
-                     phase_center_policy, ARGS.override_telescope_name)
-        print("Measurement set writing complete.")
+                     phase_center_policy, ARGS.override_telescope_name,
+                     applycal=not ARGS.uncalibrated,
+                     fill_model=ARGS.addmodel,
+                     writemodelcatalog=ARGS.writemodelcatalog,
+                     fetch_sources=not ARGS.no_fetch_sources,
+                     catalog_recache=ARGS.sources_recache)
+        logger.info("Measurement set writing complete.")
 
     elif ARGS.hdf:
-        print("Getting Data from file: {}".format(ARGS.hdf))
+        logger.info("Getting Data from file: {}".format(ARGS.hdf))
         # Load data from a HDF5 file
-        print("Writing measurement set '{}'...".format(ARGS.ms))
+        logger.info("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_hdf5(ARGS.ms, ARGS.hdf, ARGS.pol2,
-                     phase_center_policy, ARGS.override_telescope_name)
-        print("Measurement set writing complete.")
+                     phase_center_policy, ARGS.override_telescope_name,
+                     applycal=not ARGS.uncalibrated,
+                     fill_model=ARGS.addmodel,
+                     writemodelcatalog=ARGS.writemodelcatalog,
+                     fetch_sources=not ARGS.no_fetch_sources,
+                     catalog_recache=ARGS.sources_recache)
+        logger.info("Measurement set writing complete.")
 
     else:
-        print("Getting Data from API: {}".format(ARGS.api))
+        logger.info("Getting Data from API: {}".format(ARGS.api))
         api = api_handler.APIhandler(ARGS.api)
         info = api.get('info')
         ant_pos = api.get('imaging/antenna_positions')
@@ -129,11 +160,11 @@ if __name__ == "__main__":
         vis_json = api.get('imaging/vis')
         ts = api_imaging.vis_json_timestamp(vis_json)
 
-        print("Download Complete")
+        logger.info("Download Complete")
 
         cat_url = api.catalog_url(lon=config.get_lon(),
-                                    lat=config.get_lat(),
-                                    datestr=ts.isoformat())
+                                  lat=config.get_lat(),
+                                  datestr=ts.isoformat())
         src_json = api.get_url(cat_url)
 
         json_data = {'info': info,
@@ -142,7 +173,10 @@ if __name__ == "__main__":
                      'data': [[vis_json, src_json]]
                      }
 
-        print("Writing measurement set '{}'...".format(ARGS.ms))
+        logger.info("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_json(ARGS.ms, None, ARGS.pol2, phase_center_policy,
-                     ARGS.override_telescope_name, json_data=json_data)
-        print("Measurement set writing complete.")
+                     ARGS.override_telescope_name, json_data=json_data,
+                     applycal=not ARGS.uncalibrated,
+                     fill_model=ARGS.addmodel,
+                     writemodelcatalog=ARGS.writemodelcatalog)
+        logger.info("Measurement set writing complete.")
