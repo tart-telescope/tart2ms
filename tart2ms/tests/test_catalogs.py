@@ -6,4 +6,4 @@ class TestCatalogs(unittest.TestCase):
         self.assertTrue(len(catalog_reader.catalog_factory.from_3CRR()) == 173)
     
     def test_SUMMS(self):
-        self.assertTrue(len(catalog_reader.catalog_factory.from_SUMMS()) == 615)
+        self.assertTrue(len(catalog_reader.catalog_factory.from_SUMMS(fluxlim15=0.1)) == 615)

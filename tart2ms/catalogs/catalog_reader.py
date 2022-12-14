@@ -39,6 +39,26 @@ class catalog_source:
         """ Declination in ICRS frame """
         return self.__skypos.icrs.dec.dms
 
+    @property
+    def radeg(self):
+        """ Right ascention in ICRS frame """
+        return self.__skypos.icrs.ra.value
+
+    @property
+    def decdeg(self):
+        """ Declination in ICRS frame """
+        return self.__skypos.icrs.dec.value
+
+    @property
+    def rarad(self):
+        """ Right ascention in ICRS frame """
+        return np.deg2rad(self.__skypos.icrs.ra.value)
+
+    @property
+    def decrad(self):
+        """ Declination in ICRS frame """
+        return np.deg2rad(self.__skypos.icrs.dec.value)
+
     def flux(self, freq):
         return (freq / self.__reffreq)**self.__spi * \
                 self.__flux
@@ -55,13 +75,13 @@ class catalog_factory:
             x = ",".join(zipcols)
             raise RuntimeError(f"Expected columns in 3CRR catalog {x}")
         collection = []
-        for name, flux, ra, dec, spi in filter(lambda x: x[1] * (1.5e9 / 178e6)**x[4] >= fluxlim15,
+        for name, flux, ra, dec, spi in filter(lambda x: x[1] * (1.5e9 / 178e6)**-x[4] >= fluxlim15,
                                                zip(*map(lambda c: df[c].values, zipcols))):
             rah, ram, ras = tuple(map(lambda x: x.strip(), ra.strip().split(" ")))
             decd, decm, decs = tuple(map(lambda x: x.strip(), dec.strip().split(" ")))
             rahms = f"{rah}h{ram}m{ras}s"
             decdms = f"{decd}d{ram}m{ras}s"
-            collection.append(catalog_source(name, rahms, decdms, flux, spi, reffreq=178e6))
+            collection.append(catalog_source(name, rahms, decdms, flux, -spi, reffreq=178e6))
         
         return collection
     

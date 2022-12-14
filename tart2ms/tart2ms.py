@@ -50,7 +50,10 @@ from .fixvis import (fixms,
                      rephase)
 
 from .util import rayleigh_criterion
-from .ms_helper import azel2radec, predict_model
+from .ms_helper import (azel2radec,
+                        predict_model,
+                        get_catalog_sources_azel,
+                        get_solar_system_bodies)
 
 LOGGER = logging.getLogger("tart2ms")
 LOGGER.setLevel(logging.INFO)
@@ -660,6 +663,7 @@ def ms_create(ms_table_name, info,
                                                          padded_uvw=padded_uvw["UVW"],
                                                          ack=False)
                     p.next()
+                LOGGER.info("<Done>")
             else:
                 # no model or rephasing --- we will wait to the end to fill zenith positions
                 uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
@@ -682,6 +686,7 @@ def ms_create(ms_table_name, info,
                             f"of the instrument resolution during the course of this observation")
 
         if fill_model:
+            LOGGER.info(f"Predicting GNSS positions for {len(epoch_s)} timestamps")
             model_data = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
                                        uvw_data,
                                        epoch_s, spw_chan_freqs, spw_i,
@@ -690,6 +695,36 @@ def ms_create(ms_table_name, info,
                                        location,
                                        sources, epoch_s_sources, sources_obstime,
                                        writemodelcatalog)
+            if model_data is None:
+                model_data = da.zeros_like(dask_data)
+            cat_sources = get_catalog_sources_azel(obstime, location)
+            LOGGER.info(f"Predicting celestial catalog positions for {len(epoch_s)} timestamps")
+            celestial_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+                                        uvw_data,
+                                        epoch_s, spw_chan_freqs, spw_i,
+                                        zenith_directions,
+                                        map_row_to_zendir,
+                                        location,
+                                        cat_sources, epoch_s, obstime,
+                                        writemodelcatalog,
+                                        filter_elevation=20.0,
+                                        append_catalog=True)
+            LOGGER.info(f"Predicting Sun and Moon positions for {len(epoch_s)} timestamps")
+            cat_sources = get_solar_system_bodies(obstime, location)
+            solar_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+                                        uvw_data,
+                                        epoch_s, spw_chan_freqs, spw_i,
+                                        zenith_directions,
+                                        map_row_to_zendir,
+                                        location,
+                                        cat_sources, epoch_s, obstime,
+                                        writemodelcatalog,
+                                        filter_elevation=20.0,
+                                        append_catalog=True)
+
+            if solar_model is None:
+                solar_model = da.zeros_like(dask_data)
+            model_data += solar_model
 
         if phase_center_policy == 'rephase-obs-midpoint' or \
            phase_center_policy == 'rephase-NCP' or \
@@ -698,7 +733,6 @@ def ms_create(ms_table_name, info,
                                      frame='icrs')
             new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
                                  f"{new_phase_dir.dec.dms[0]:02.0f}d{abs(new_phase_dir.dec.dms[1]):02.0f}m{abs(new_phase_dir.dec.dms[2]):05.2f}s"
-            LOGGER.info("<Done>")
             LOGGER.info(
                 f"Per user request: Rephase all data to {new_phase_dir_repr}")
             rephased_data = da.empty_like(dask_data)
