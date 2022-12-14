@@ -104,3 +104,26 @@ class catalog_factory:
             collection.append(catalog_source(name, rahms, decdms, fluxmjy*1e-3, -0.7, reffreq=843e6))
         
         return collection
+
+    @classmethod
+    def from_MKGains(cls,
+                     filename=os.path.join(os.path.split(os.path.abspath(__file__))[0], 
+                                           "MeerKAT_gaincal_list"),
+                     fluxlim15=1.0):
+        df = read_csv(filename, delimiter="\t")
+        zipcols = ["name", "S1.4GHz (Jy)", "RA (J2000)", "DEC (J2000)", "Alpha"]
+        if not set(zipcols).issubset(set(df.columns)):
+            x = ",".join(zipcols)
+            raise RuntimeError(f"Expected columns in MeerKAT calibrator catalog {x}")
+        df["S1.4GHz (Jy)"] = np.array(map(lambda x: float(x.split("+/-")[0].strip()), df["S1.4GHz (Jy)"]))
+        df["Alpha"] = np.array(map(lambda x: float(x.split("+/-")[0].strip()), df["Alpha"]))
+        collection = []
+        for name, flux, ra, dec, spi in filter(lambda x: x[1] * (1.5e9 / 1.4e9)**x[4] >= fluxlim15,
+                                               zip(*map(lambda c: df[c].values, zipcols))):
+            rah, ram, ras = tuple(map(lambda x: x.strip(), ra.strip().split(":")))
+            decd, decm, decs = tuple(map(lambda x: x.strip(), dec.strip().split(":")))
+            rahms = f"{rah}h{ram}m{ras}s"
+            decdms = f"{decd}d{ram}m{ras}s"
+            collection.append(catalog_source(name, rahms, decdms, flux, -spi, reffreq=178e6))
+        
+        return collection

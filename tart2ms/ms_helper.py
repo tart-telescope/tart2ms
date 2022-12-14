@@ -66,6 +66,7 @@ def get_array_location(ms_file):
 def get_catalog_sources_azel(timestamps, location):
     catsources = catalog_factory.from_3CRR(fluxlim15=0.5)
     catsources += catalog_factory.from_SUMMS(fluxlim15=0.5)
+    catsources += catalog_factory.from_MKGains(fluxlim15=0.5)
     sources = []
     ras = list(map(lambda s: s.rarad, catsources))
     decs = list(map(lambda s: s.decrad, catsources))
