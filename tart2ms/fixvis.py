@@ -218,14 +218,14 @@ def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1):
         raise ValueError("ref must be shape nfield x 2")
     if pos.size != 2 and pos.shape[0] != 2:
         raise ValueError("pos must be shape 2")
-    for fid in uniq_fields:
+    for ifid, fid in enumerate(uniq_fields):
         selfid = field_ids == fid
         nrowsel = np.sum(selfid)
         cos = np.cos
         sin = np.sin
         sqrt = np.sqrt
         ra, dec = np.deg2rad(pos)
-        ra0, dec0 = np.deg2rad(refdir[fid])
+        ra0, dec0 = np.deg2rad(refdir[ifid])
         d_ra = ra - ra0
         d_dec = dec
         d_decp = dec0
