@@ -33,6 +33,7 @@ setup(name='tart2ms',
       test_suite='nose.collector',
       tests_require=['nose'],
       packages=['tart2ms'],
+      include_package_data=True,
       scripts=['bin/tart2ms'],
       classifiers=[
           "Development Status :: 4 - Beta",

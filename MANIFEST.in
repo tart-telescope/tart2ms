@@ -2,3 +2,4 @@ include LICENSE.txt
 include README.md
 include tart2ms/catalogs/*
 include tart2ms/named_phasings.json
+include tart2ms/*.py

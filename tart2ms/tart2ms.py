@@ -39,7 +39,7 @@ from tart.operation import settings
 from tart.imaging.visibility import Visibility
 from tart.imaging import (calibration,
                           elaz)
-from tart2ms.catalogs import catalog_reader
+from .catalogs import catalog_reader
 
 from tart_tools import (api_imaging,
                         api_handler)
@@ -859,9 +859,8 @@ def ms_create(ms_table_name, info,
         # rephasing requires us to tilt w towards the rephased point on the sphere
         # this is also needed if we haven't generated zenithal points yet because we didn't predict
         # a model
-        if phase_center_policy == 'rephase-obs-midpoint' or \
-           isinstance(phase_center_policy, SkyCoord) or \
-           phase_center_policy.find('rephase-') == 0 or \
+        if isinstance(phase_center_policy, SkyCoord) or \
+           phase_center_policy.find('rephase-') > 0 or \
            not fill_model:
             fixms(ms_table_name)
     else:
