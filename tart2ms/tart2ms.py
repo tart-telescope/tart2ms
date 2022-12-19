@@ -39,6 +39,7 @@ from tart.operation import settings
 from tart.imaging.visibility import Visibility
 from tart.imaging import (calibration,
                           elaz)
+from tart2ms.catalogs import catalog_reader
 
 from tart_tools import (api_imaging,
                         api_handler)
@@ -49,7 +50,8 @@ from .fixvis import (fixms,
                      progress,
                      rephase)
 
-from .util import rayleigh_criterion
+from .util import (rayleigh_criterion,
+                   read_known_phasings)
 from .ms_helper import (azel2radec,
                         predict_model,
                         get_catalog_sources_azel,
@@ -360,17 +362,38 @@ def ms_create(ms_table_name, info,
 
     if phase_center_policy == "instantaneous-zenith":
         pass
+    elif isinstance(phase_center_policy, SkyCoord):
+        direction = np.deg2rad(np.array([[phase_center_policy.icrs.ra.value, 
+                                          phase_center_policy.icrs.dec.value]]).reshape(1, 2, 1))
     elif (phase_center_policy == "no-rephase-obs-midpoint") or \
          (phase_center_policy == "rephase-obs-midpoint"):
         direction = direction[:, :, direction.shape[2]//2].reshape(1, 2, 1)  # observation midpoint
-    elif phase_center_policy == "rephase-SCP":
-        direction = np.array([0, np.deg2rad(-90)]).reshape(1, 2, 1)
-    elif phase_center_policy == "rephase-NCP":
-        direction = np.array([0, np.deg2rad(90)]).reshape(1, 2, 1)
+    elif phase_center_policy.find("rephase-") == 0:
+        fn = phase_center_policy.replace("rephase-","")
+        # 3CRR currently only catalog with special names
+        catalog_positions = catalog_reader.catalog_factory.from_3CRR(fluxlim15=0.0)
+        named_positions = read_known_phasings()
+        fsrc = list(filter(lambda x: x.name == fn, catalog_positions))
+        if len(fsrc) > 0:
+            direction = np.array([[fsrc[0].rarad, fsrc[0].decrad]]).reshape(1, 2, 1)
+        else: # otherwise it is in the named positions list
+            fsrc = list(filter(lambda x: x['name'].upper() == fn, named_positions))
+            if len(fsrc) == 0:
+                raise RuntimeError(f"Unknown named source {fn}")
+            if fsrc[0]['position']['FRAME'] == "Special Body":
+                raise NotImplementedError("TODO")
+            else:
+                # we assume we can parse it with astropy
+                ra = fsrc[0]['position']["RA"]
+                dec = fsrc[0]['position']["DEC"]
+                equinox = fsrc[0]['position']["EQUINOX"]
+                frame = fsrc[0]['position']["FRAME"]
+                crd = SkyCoord(f"{ra} {dec}", equinox=equinox, frame=frame)
+                direction = np.deg2rad(np.array([[crd.icrs.ra.value, crd.icrs.dec.value]]).reshape(1, 2, 1))
     else:
         raise ValueError(f"phase_center_policy must be one of "
-                         f"['instantaneous-zenith','rephase-obs-midpoint','rephase-SCP','rephase-NCP',"
-                         f"'no-rephase-obs-midpoint'] got {phase_center_policy}")
+                         f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint',"
+                         f"'rephase-<named position>' or Astropy.SkyCoord] got {phase_center_policy}")
     field_name = da.asarray(np.array(list(map(__twelveball, direction.reshape(2, direction.shape[2]).T)),
                                      dtype=object), chunks=1)
     field_direction = da.asarray(
@@ -516,7 +539,7 @@ def ms_create(ms_table_name, info,
     if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
         LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
                        f"for multi-timestamp databases. Your UVW coordinates will be wrong")
-    if uvw_generator == 'telescope_snapshot':
+    if uvw_generator == 'telescope_snapshot' and phase_center_policy == "instantaneous-zenith":
         bl_pos = np.array(ant_pos)[baselines]
         uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
         # Use the - sign to get the same orientation as our tart projections.
@@ -526,7 +549,8 @@ def ms_create(ms_table_name, info,
         uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
     else:
         raise ValueError(
-            'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
+            'uvw_generator expects either mode "telescope_snapshot" or "casacore". '
+            'Telescope snapshot mode can only be specified for instantaneous-zenith phasing')
 
     for ddid, (spw_id, pol_id) in enumerate(zip(spw_ids, pol_ids)):
         # Infer row, chan and correlation shape
@@ -582,17 +606,17 @@ def ms_create(ms_table_name, info,
             # to ensure we can rephase them to a common frame in the end
             field_no = scan.copy() - 1  # offset to start at 0 (FK)
         elif (phase_center_policy == 'no-rephase-obs-midpoint' or
-              phase_center_policy == 'rephase-obs-midpoint' or
-              phase_center_policy == 'rephase-NCP' or
-              phase_center_policy == 'rephase-SCP'):
+              isinstance(phase_center_policy, SkyCoord) or
+              'rephase-' in phase_center_policy):
             # user is just going to get a single zenith position at the observation centoid
             scan = np.ones(len(epoch_s), dtype=int).repeat(
                 nbl)  # start at 1, per convention
             field_no = np.zeros_like(scan)
         else:
             raise ValueError(f"phase_center_policy must be one of "
-                             f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint','rephase-SCP','rephase-NCP'] "
-                             f"got {phase_center_policy}")
+                         f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint',"
+                         f"'rephase-<named position>' or Astropy.SkyCoord] got {phase_center_policy}")
+        
 
         # apply rephasor if needed
         mean_sidereal_day = 23 + 56 / 60. + 4.0905 / 3600.  # hrs
@@ -622,20 +646,39 @@ def ms_create(ms_table_name, info,
         elif uvw_generator == 'casacore':
             # need to generate UVW coordinates for zenith positions for the model prediction step
             # if enabled otherwise we can wait till the end (unless we rephase)
-            if phase_center_policy == 'rephase-obs-midpoint' or \
-               phase_center_policy == 'rephase-NCP' or \
-               phase_center_policy == 'rephase-SCP' or \
+            if isinstance(phase_center_policy, SkyCoord) or \
+               phase_center_policy.find('rephase-') == 0 or \
                fill_model:
                 # we must first have accurate uvw coordinates in each different zenith direction
                 if phase_center_policy == 'rephase-obs-midpoint':
                     centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
                         1, 2)
-                elif phase_center_policy == 'rephase-NCP':
-                    centroid_direction = np.array(
-                        [0, np.deg2rad(+90)]).reshape(1, 2)
-                elif phase_center_policy == 'rephase-SCP':
-                    centroid_direction = np.array(
-                        [0, np.deg2rad(-90)]).reshape(1, 2)
+                elif isinstance(phase_center_policy, SkyCoord):
+                    centroid_direction = np.deg2rad(np.array([[phase_center_policy.icrs.ra.value, 
+                                                               phase_center_policy.icrs.dec.value]]).reshape(1, 2))
+                elif phase_center_policy.find("rephase-") == 0:
+                    fn = phase_center_policy.replace("rephase-","")
+                    # 3CRR currently only catalog with special names
+                    catalog_positions = catalog_reader.catalog_factory.from_3CRR(fluxlim15=0.0)
+                    named_positions = read_known_phasings()
+                    fsrc = list(filter(lambda x: x.name == fn, catalog_positions))
+                    if len(fsrc) > 0:
+                        centroid_direction = np.array([[fsrc[0].rarad, fsrc[0].decrad]]).reshape(1, 2)
+                    else: # otherwise it is in the named positions list
+                        fsrc = list(filter(lambda x: x['name'].upper() == fn, named_positions))
+                        if len(fsrc) == 0:
+                            raise RuntimeError(f"Unknown named source {fn}")
+                        if fsrc[0]['position']['FRAME'] == "Special Body":
+                            raise NotImplementedError("TODO")
+                        else:
+                            # we assume we can parse it with astropy
+                            ra = fsrc[0]['position']["RA"]
+                            dec = fsrc[0]['position']["DEC"]
+                            equinox = fsrc[0]['position']["EQUINOX"]
+                            frame = fsrc[0]['position']["FRAME"]
+                            crd = SkyCoord(f"{ra} {dec}", equinox=equinox, frame=frame)
+                            centroid_direction = np.deg2rad(np.array([[crd.icrs.ra.value,
+                                                                       crd.icrs.dec.value]]).reshape(1, 2))
                 elif phase_center_policy == "instantaneous-zenith":
                     centroid_direction = zenith_directions
                 else:
@@ -726,9 +769,8 @@ def ms_create(ms_table_name, info,
                 solar_model = da.zeros_like(dask_data)
             model_data += solar_model
 
-        if phase_center_policy == 'rephase-obs-midpoint' or \
-           phase_center_policy == 'rephase-NCP' or \
-           phase_center_policy == 'rephase-SCP':
+        if isinstance(phase_center_policy, SkyCoord) or \
+           phase_center_policy.find('rephase-') == 0:
             new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
                                      frame='icrs')
             new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
@@ -818,8 +860,8 @@ def ms_create(ms_table_name, info,
         # this is also needed if we haven't generated zenithal points yet because we didn't predict
         # a model
         if phase_center_policy == 'rephase-obs-midpoint' or \
-           phase_center_policy == 'rephase-NCP' or \
-           phase_center_policy == 'rephase-SCP' or \
+           isinstance(phase_center_policy, SkyCoord) or \
+           phase_center_policy.find('rephase-') == 0 or \
            not fill_model:
             fixms(ms_table_name)
     else:

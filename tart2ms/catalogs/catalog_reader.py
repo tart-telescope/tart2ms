@@ -80,7 +80,7 @@ class catalog_factory:
             rah, ram, ras = tuple(map(lambda x: x.strip(), ra.strip().split(" ")))
             decd, decm, decs = tuple(map(lambda x: x.strip(), dec.strip().split(" ")))
             rahms = f"{rah}h{ram}m{ras}s"
-            decdms = f"{decd}d{ram}m{ras}s"
+            decdms = f"{decd}d{decm}m{decs}s"
             collection.append(catalog_source(name, rahms, decdms, flux, -spi, reffreq=178e6))
         
         return collection
@@ -100,7 +100,7 @@ class catalog_factory:
                                                                 zip(*map(lambda c: df[c].values, zipcols))):
             name = f"J{rah}{ram}{decd}{decm}"
             rahms = f"{rah}h{ram}m{ras}s"
-            decdms = f"{decd}d{ram}m{ras}s"
+            decdms = f"{decd}d{decm}m{decs}s"
             collection.append(catalog_source(name, rahms, decdms, fluxmjy*1e-3, -0.7, reffreq=843e6))
         
         return collection
@@ -123,7 +123,7 @@ class catalog_factory:
             rah, ram, ras = tuple(map(lambda x: x.strip(), ra.strip().split(":")))
             decd, decm, decs = tuple(map(lambda x: x.strip(), dec.strip().split(":")))
             rahms = f"{rah}h{ram}m{ras}s"
-            decdms = f"{decd}d{ram}m{ras}s"
+            decdms = f"{decd}d{decm}m{decs}s"
             collection.append(catalog_source(name, rahms, decdms, flux, -spi, reffreq=178e6))
         
         return collection
