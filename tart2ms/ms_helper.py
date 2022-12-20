@@ -29,14 +29,19 @@ except ImportError:
     logger.warning("Cannot import Africanus API. MODEL_DATA filling capabilities disabled")
     AFRICANUS_DFT_AVAIL = False
 
-def azel2radec(az, el, location, obstime):
+def azel2radec(az, el, location, obstime, distance=None):
     """ az, el -- in degrees
+        distance -- needed to convert solar system bodies back to J2000 in the barycentric frame
         location -- observer location on the ground 
         time -- astropy time for the observation
         returns radec in radians (fk5 frame)
     """
-    dir_altaz = SkyCoord(alt=el*u.deg, az=az*u.deg, obstime=obstime,
-                         frame='altaz', location=location)
+    if distance is None:
+        dir_altaz = SkyCoord(alt=el*u.deg, az=az*u.deg, obstime=obstime,
+                            frame='altaz', location=location)
+    else:
+        dir_altaz = SkyCoord(alt=el*u.deg, az=az*u.deg, obstime=obstime,
+                            frame='altaz', location=location, distance=distance)
     dir_j2000 = dir_altaz.transform_to('icrs')
     direction_src = [dir_j2000.ra.radian, dir_j2000.dec.radian]
     return direction_src
@@ -138,6 +143,7 @@ def get_solar_system_bodies(timestamps, location):
                 "flux": model.rj(),
                 "az": np.rad2deg(direction_src[1]),
                 "el": np.rad2deg(direction_src[0]),
+                "distance": body.distance # AU - needed for backwards conversion to J2000 epoch of non extra-galactic objects
             })            
         sources.append(ttsources)
     return sources
@@ -194,8 +200,8 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
             for src_i, src in enumerate(sources_i):
                 names.append(src['name'].replace(" ", "_").replace("CELESTIAL_", "").replace("SOLAR_", ""))
                 # Convert to J2000
-                direction_src = azel2radec(az=src['az'], el=src['el'], 
-                                            location=location, obstime=sources_obstime[nn_source_epoch])
+                direction_src = azel2radec(az=src['az'], el=src['el'], distance=src.get('distance', None), 
+                                           location=location, obstime=sources_obstime[nn_source_epoch])
                 sources_radec[src_i, :] = direction_src
             # get lm cosines to sources
             zenith_i = zenith_directions[dataset_i]

@@ -400,7 +400,7 @@ def ms_create(ms_table_name, info,
             if len(fsrc) == 0:
                 raise RuntimeError(f"Unknown named source {fn}")
             if fsrc[0]['position']['FRAME'] == "Special Body":
-                body = ac.get_body(fn, sorted(obstime)[0], location=location)
+                body = ac.get_body(fn, obstime[0], location=location)
                 LOGGER.critical(f"User caution: enabling non-sidereal tracking of '{fn}'. Indicated field centre will be "
                                 f"that of the first timestamp in your synthesized map, but W-coordinate will be actively "
                                 f"fringestopping at source position")
@@ -757,7 +757,6 @@ def ms_create(ms_table_name, info,
 
         np_uvw = uvw_array.reshape((row, 3))
         uvw_data = da.from_array(np_uvw)
-
         if phase_center_policy == 'no-rephase-obs-midpoint' and \
            obs_length > snapshot_length_cutoff:
             LOGGER.critical(f"You are choosing to set the field phase direction at the centre point "
@@ -961,11 +960,16 @@ def ms_create(ms_table_name, info,
         # rephasing requires us to tilt w towards the rephased point on the sphere
         # this is also needed if we haven't generated zenithal points yet because we didn't predict
         # a model
-        fn = phase_center_policy.replace("rephase-","")
-        fsrc = list(filter(lambda x: x['name'].upper() == fn and
-                                     x['position']["FRAME"] == "Special Body",
-                           read_known_phasings()))
-        is_special_body = len(fsrc) > 0
+        if isinstance(phase_center_policy, str):
+            fn = phase_center_policy.replace("rephase-","")
+            fsrc = list(filter(lambda x: x['name'].upper() == fn and
+                                        x['position']["FRAME"] == "Special Body",
+                            read_known_phasings()))
+            is_special_body = len(fsrc) > 0
+        elif isinstance(phase_center_policy, SkyCoord):
+            is_special_body = False
+        else:
+            raise ValueError("Invalid type for phase_centre_policy - expect string or SkyCoord")
         single_field = isinstance(phase_center_policy, SkyCoord) or \
                        phase_center_policy.find('rephase-') == 0 or \
                        phase_center_policy == "no-rephase-obs-midpoint"      
