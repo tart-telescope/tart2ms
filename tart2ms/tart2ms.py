@@ -812,6 +812,7 @@ def ms_create(ms_table_name, info,
             if solar_model is None:
                 solar_model = da.zeros_like(dask_data)
             model_data += solar_model
+            model_data.rechunk(dask_data.chunks)
 
         if isinstance(phase_center_policy, SkyCoord) or \
            phase_center_policy.find('rephase-') == 0:
@@ -835,6 +836,7 @@ def ms_create(ms_table_name, info,
                                 refdir=np.rad2deg(zenith_directions),
                                 field_ids=map_row_to_zendir)
                 dask_data = rephased_data
+                rephased_data = da.empty_like(dask_data)
                 if fill_model:
                     rephased_data = \
                         da.map_blocks(rephase,
@@ -850,37 +852,47 @@ def ms_create(ms_table_name, info,
                     model_data = rephased_data
             elif centroid_direction.shape[0] == len(obstime):
                 LOGGER.info(f"Per user request: Rephase data to special field {phase_center_policy.replace('rephase-','')} per timestamp")
-                rephased_data = da.empty_like(dask_data)
+                rephased_data = da.zeros_like(dask_data)
                 subfields = np.unique(map_row_to_zendir)
+                p = progress(
+                    "Phasing data", max=subfields.size)
                 for sfi in subfields:
                     sel = map_row_to_zendir == sfi
-                    rephased_data[sel,:,:] = \
+                    rephased_data += \
                         da.map_blocks(rephase,
-                                    dask_data[sel,:,:],
+                                    dask_data,
                                     dtype=dask_data.dtype,
-                                    chunks=dask_data[sel,:,:].chunks,
+                                    chunks=dask_data.chunks,
                                     # kwargs for rephase
                                     freq=spw_chan_freqs[spw_id],
                                     pos=np.rad2deg(centroid_direction[sfi, :]),
-                                    uvw=uvw_data[sel,:],
+                                    uvw=uvw_data,
                                     refdir=np.rad2deg(zenith_directions[sfi, :].reshape(1, 2)),
-                                    field_ids=map_row_to_zendir[sel])
+                                    field_ids=map_row_to_zendir,
+                                    sel=sel)
+                    p.next()
+                LOGGER.info("<Done>")
                 dask_data = rephased_data
-
                 if fill_model:
+                    rephased_data = da.zeros_like(dask_data)
+                    p = progress(
+                        "Phasing model data", max=subfields.size)
                     for sfi in subfields:
                         sel = map_row_to_zendir == sfi
-                        rephased_data[sel,:,:] = \
+                        rephased_data += \
                             da.map_blocks(rephase,
-                                        model_data[sel,:,:],
+                                        model_data,
                                         dtype=model_data.dtype,
-                                        chunks=model_data[sel,:,:].chunks,
+                                        chunks=model_data.chunks,
                                         # kwargs for rephase
                                         freq=spw_chan_freqs[spw_id],
                                         pos=np.rad2deg(centroid_direction[sfi, :]),
-                                        uvw=uvw_data[sel,:],
+                                        uvw=uvw_data,
                                         refdir=np.rad2deg(zenith_directions[sfi, :].reshape(1, 2)),
-                                        field_ids=map_row_to_zendir[sel])
+                                        field_ids=map_row_to_zendir,
+                                        sel=sel)
+                        p.next()
+                    LOGGER.info("<Done>")
                     model_data = rephased_data
 
                 # regenerate UVW coordinates for special non-sidereal positions
