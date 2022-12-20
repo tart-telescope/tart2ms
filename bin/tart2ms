@@ -73,6 +73,8 @@ if __name__ == "__main__":
                         help="Write a catalog of GNSS sources in Tigger LSM format to the current path. Only of use in combination with --add-model")
     parser.add_argument("--skip-online-source-catalog", dest="no_fetch_sources", required=False, action="store_true",
                         help="Skips fetching a catalog of GNSS sources online (not recommended for HDF5 based loading)")
+    parser.add_argument("--skip-celestial-source-catalog", dest="no_celestial_sources", required=False, action="store_true",
+                        help="Skips predicting stronger celestial source prediction from 3CRR, etc. catalogs")
     parser.add_argument("--no-cache", dest="sources_recache", required=False, action="store_true",
                         help="Ignores GNSS sources already cached from a previous run")
     
@@ -147,8 +149,8 @@ if __name__ == "__main__":
                      fill_model=ARGS.addmodel,
                      writemodelcatalog=ARGS.writemodelcatalog,
                      fetch_sources=not ARGS.no_fetch_sources,
-                     catalog_recache=ARGS.sources_recache)
-        logger.info("Measurement set writing complete.")
+                     catalog_recache=ARGS.sources_recache,
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources)
 
     elif ARGS.hdf:
         logger.info("Getting Data from file: {}".format(ARGS.hdf))
@@ -160,8 +162,8 @@ if __name__ == "__main__":
                      fill_model=ARGS.addmodel,
                      writemodelcatalog=ARGS.writemodelcatalog,
                      fetch_sources=not ARGS.no_fetch_sources,
-                     catalog_recache=ARGS.sources_recache)
-        logger.info("Measurement set writing complete.")
+                     catalog_recache=ARGS.sources_recache,
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources)
 
     else:
         logger.info("Getting Data from API: {}".format(ARGS.api))
@@ -191,5 +193,5 @@ if __name__ == "__main__":
                      ARGS.override_telescope_name, json_data=json_data,
                      applycal=not ARGS.uncalibrated,
                      fill_model=ARGS.addmodel,
-                     writemodelcatalog=ARGS.writemodelcatalog)
-        logger.info("Measurement set writing complete.")
+                     writemodelcatalog=ARGS.writemodelcatalog,
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources)

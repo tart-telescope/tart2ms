@@ -12,6 +12,10 @@ import logging
 import json
 import h5py
 import dask
+from dask.diagnostics import ProgressBar
+#dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
+dask.config.set(scheduler='processes')  # overwrite default with threaded scheduler
+#dask.config.set(scheduler='synchronous')  # overwrite default with threaded scheduler
 import dateutil
 
 import dask.array as da
@@ -131,7 +135,7 @@ class MSTable:
     '''
         Little Helper to simplify writing a table.
     '''
-
+    __write_futures = []
     def __init__(self, ms_name, table_name):
         self.table_name = "::".join((ms_name, table_name))
         self.datasets = []
@@ -140,8 +144,19 @@ class MSTable:
         self.datasets.append(dataset)
 
     def write(self):
+        """ Creates a future to be computed 
+            ensure to call dask.compute with get_futures
+            to finalize graph construction
+        """
         writes = xds_to_table(self.datasets, self.table_name, columns="ALL")
-        dask.compute(writes)
+        self.__write_futures.append(writes)
+
+    @classmethod
+    def get_futures(cls):
+        """ returns a list of futures to be passed to dask.compute """
+        futures = cls.__write_futures
+        cls.__write_futures = []
+        return futures
 
 
 def timestamp_to_ms_epoch(t_stamp):
@@ -172,7 +187,8 @@ def ms_create(ms_table_name, info,
               uvw_generator='casacore',
               fill_model=True,
               writemodelcatalog=True,
-              sources_timestamps=None):
+              sources_timestamps=None,
+              write_extragalactic_catalogs=True):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -205,6 +221,7 @@ def ms_create(ms_table_name, info,
     None
 
     '''
+    start_time = time.time()
     try:
         loc = info['location']
     except Exception:
@@ -434,6 +451,10 @@ def ms_create(ms_table_name, info,
 
     # ----------------------------- SOURCE datasets -------------------------- #
     if sources:
+        all_numlines = []
+        all_name = []
+        all_time = []
+        all_direction = []
         if len(epoch_s_sources) != len(sources):
             raise RuntimeError(
                 "If sources are specified then we expected epochs to be of same size as sources list")
@@ -456,13 +477,17 @@ def ms_create(ms_table_name, info,
                     [name], dtype=object), chunks=1)
                 dask_time = da.asarray(np.asarray(
                     [epoch_s_i], dtype=object), chunks=1)
-                dataset = Dataset({
-                    "NUM_LINES": (("row",), dask_num_lines),
-                    "NAME": (("row",), dask_name),
-                    "TIME": (("row",), dask_time),
-                    "DIRECTION": (("row", "dir"), dask_direction),
-                })
-                src_table.append(dataset)
+                all_numlines.append(dask_num_lines)
+                all_name.append(dask_name)
+                all_time.append(dask_time)
+                all_direction.append(dask_direction)
+        dataset = Dataset({
+            "NUM_LINES": (("row",), da.concatenate(all_numlines, axis=0).rechunk(-1)),
+            "NAME": (("row",), da.concatenate(all_name, axis=0).rechunk(-1)),
+            "TIME": (("row",), da.concatenate(all_time, axis=0).rechunk(-1)),
+            "DIRECTION": (("row", "dir"), da.concatenate(all_direction, axis=0).rechunk(-1)),
+        })
+        src_table.append(dataset)
 
     # Create POLARISATION datasets.
     # Dataset per output row required because column shapes are variable
@@ -649,6 +674,9 @@ def ms_create(ms_table_name, info,
                                                     zenith_directions.shape[2]).T.copy()
         map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
         if uvw_generator == 'telescope_snapshot':
+            if isinstance(phase_center_policy, SkyCoord) or \
+               phase_center_policy.find('rephase-') >= 0: # rephase or non-rephase single field database
+               raise RuntimeError("Telescope snapshot UVW mode may only be used for zenethal snapshotting mode")
             bl_pos = np.array(ant_pos)[baselines]
             uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
             # Use the - sign to get the same orientation as our tart projections.
@@ -660,7 +688,7 @@ def ms_create(ms_table_name, info,
                phase_center_policy.find('rephase-') == 0 or \
                fill_model:
                 # we must first have accurate uvw coordinates in each different zenith direction
-                if phase_center_policy == 'rephase-obs-midpoint':
+                if phase_center_policy == 'rephase-obs-midpoint' or phase_center_policy == 'no-rephase-obs-midpoint':
                     centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
                         1, 2)
                 elif isinstance(phase_center_policy, SkyCoord):
@@ -754,17 +782,21 @@ def ms_create(ms_table_name, info,
             if model_data is None:
                 model_data = da.zeros_like(dask_data)
             cat_sources = get_catalog_sources_azel(obstime, location)
-            LOGGER.info(f"Predicting celestial catalog positions for {len(epoch_s)} timestamps")
-            celestial_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
-                                        uvw_data,
-                                        epoch_s, spw_chan_freqs, spw_i,
-                                        zenith_directions,
-                                        map_row_to_zendir,
-                                        location,
-                                        cat_sources, epoch_s, obstime,
-                                        writemodelcatalog,
-                                        filter_elevation=20.0,
-                                        append_catalog=True)
+            if write_extragalactic_catalogs:
+                LOGGER.info(f"Predicting celestial catalog positions for {len(epoch_s)} timestamps")
+                celestial_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+                                            uvw_data,
+                                            epoch_s, spw_chan_freqs, spw_i,
+                                            zenith_directions,
+                                            map_row_to_zendir,
+                                            location,
+                                            cat_sources, epoch_s, obstime,
+                                            writemodelcatalog,
+                                            filter_elevation=20.0,
+                                            append_catalog=True)
+                if celestial_model is None:
+                    celestial_model = da.zeros_like(dask_data)
+                model_data += celestial_model
             LOGGER.info(f"Predicting Sun and Moon positions for {len(epoch_s)} timestamps")
             cat_sources = get_solar_system_bodies(obstime, location)
             solar_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
@@ -812,7 +844,7 @@ def ms_create(ms_table_name, info,
                                     chunks=model_data.chunks,
                                     # kwargs for rephase
                                     freq=spw_chan_freqs[spw_id],
-                                    pos=np.rad2deg(centroid_direction[sfi, :]),
+                                    pos=np.rad2deg(centroid_direction[0, :]),
                                     uvw=uvw_data,
                                     refdir=np.rad2deg(zenith_directions),
                                     field_ids=map_row_to_zendir)
@@ -911,23 +943,20 @@ def ms_create(ms_table_name, info,
         ms_datasets.append(dataset)
 
     ms_writes = xds_to_table(ms_datasets, ms_table_name, columns="ALL")
+    # auxilary table futures creation
     spw_writes = xds_to_table(spw_datasets, spw_table_name, columns="ALL")
     ddid_writes = xds_to_table(ddid_datasets, ddid_table_name, columns="ALL")
+    for tt in [ant_table, feed_table, field_table, pol_table, obs_table, src_table]:
+        tt.write()
 
-    dask.compute(ms_writes)
+    # execute graph with futures
+    LOGGER.info("Synthesizing MS...")
+    with ProgressBar():
+        dask.compute([ms_writes + spw_writes + ddid_writes] + MSTable.get_futures())
 
-    ant_table.write()
-    feed_table.write()
-    field_table.write()
-    pol_table.write()
-    obs_table.write()
-    src_table.write()
-
-    dask.compute(spw_writes)
-    dask.compute(ddid_writes)
-    LOGGER.info("Done writing. Performing finalization of UVW coordinates")
+    LOGGER.info("Performing finalization of UVW coordinates if needed")
     if uvw_generator == 'telescope_snapshot':
-        pass
+        pass # user has been warned about their choice -- this cannot be used when rephasing
     elif uvw_generator == 'casacore':
         # rephasing requires us to tilt w towards the rephased point on the sphere
         # this is also needed if we haven't generated zenithal points yet because we didn't predict
@@ -937,13 +966,19 @@ def ms_create(ms_table_name, info,
                                      x['position']["FRAME"] == "Special Body",
                            read_known_phasings()))
         is_special_body = len(fsrc) > 0
-        if (isinstance(phase_center_policy, SkyCoord) or 
-            phase_center_policy.find('rephase-') > 0 or 
-            not fill_model) and not is_special_body:
-            fixms(ms_table_name)
+        single_field = isinstance(phase_center_policy, SkyCoord) or \
+                       phase_center_policy.find('rephase-') == 0 or \
+                       phase_center_policy == "no-rephase-obs-midpoint"      
+        if not is_special_body: # non-sidereal tracking fields have their UVW computed per timestamp due to change in RA,DEC
+            if (single_field or # non-zeniths for which UVW are needed
+                (not single_field and not fill_model)): # zeniths not yet computed - no model predicts happened
+                fixms(ms_table_name)
     else:
         raise ValueError(
             'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
+    end_time = time.time()
+    elapsed = (end_time - start_time)
+    LOGGER.info(f"Measurement set writing complete. Took {elapsed // 60:.0f}m{elapsed % 60.:.2f}s")
     
 def __print_infodict_keys(dico_info, keys, just=25):
     LOGGER.info("Observatory parameters:")
@@ -1002,7 +1037,8 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
     return sources
 
 def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore",
-                 applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False):
+                 applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
+                 write_extragalactic_catalogs=True):
     if pol2:
         pol_feeds = ['RR', 'LL']
     else:
@@ -1127,12 +1163,14 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
               override_telescope_name=override_telescope_name,
               uvw_generator=uvw_generator,
               fill_model=fill_model,
-              writemodelcatalog=writemodelcatalog)
+              writemodelcatalog=writemodelcatalog,
+              write_extragalactic_catalogs=write_extragalactic_catalogs)
 
 
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name,
                  uvw_generator="casacore", json_data=None, applycal=True, fill_model=False,
-                 writemodelcatalog=True, fetch_sources=True, catalog_recache=False):
+                 writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
+                 write_extragalactic_catalogs=True):
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
@@ -1258,4 +1296,5 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
               override_telescope_name=override_telescope_name,
               uvw_generator=uvw_generator,
               fill_model=fill_model,
-              writemodelcatalog=writemodelcatalog)
+              writemodelcatalog=writemodelcatalog,
+              write_extragalactic_catalogs=write_extragalactic_catalogs)
