@@ -191,7 +191,7 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                                 "the databases you've provided contains no catalog source information. The MODEL_DATA "
                                 "column of your database may be incomplete")
                 continue
-            if abs(epoch_s_i - data_epoch_i) > 1.0e-3:
+            if abs(epoch_s_i - data_epoch_i) > 60.0:
                 logger.info(f"Predicting model for source catalog epoch {epoch_s_i:.2f} for data epoch "
                             f"{data_epoch_i:.2f} (temporal difference: {abs(epoch_s_i - data_epoch_i):.2f} s)")
             # get J2000 RADEC

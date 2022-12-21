@@ -5,6 +5,9 @@
 import os
 import shutil
 
+from datetime import datetime as dt
+import time
+
 import argparse
 import logging
 
@@ -77,8 +80,16 @@ if __name__ == "__main__":
                         help="Skips predicting stronger celestial source prediction from 3CRR, etc. catalogs")
     parser.add_argument("--no-cache", dest="sources_recache", required=False, action="store_true",
                         help="Ignores GNSS sources already cached from a previous run")
+    parser.add_argument('--timerange-start-utc', dest="timerange_start_utc", required=False, default=None,
+                        help="Include only timestamps after this UTC time, e.g. 2022-03-23T21:08:12")
+    parser.add_argument('--timerange-end-utc', dest="timerange_end_utc", required=False, default=None,
+                        help="Include only timestamps before this UTC time, e.g. 2022-03-23T23:30:12")
     
     ARGS = parser.parse_args()
+    def __parsedateISO8601(x):
+        return dt(*time.strptime(x, "%Y-%m-%dT%H:%M:%S")[:6])
+    ARGS.timerange_start_utc = __parsedateISO8601(ARGS.timerange_start_utc) if ARGS.timerange_start_utc is not None else None
+    ARGS.timerange_end_utc = __parsedateISO8601(ARGS.timerange_end_utc) if ARGS.timerange_end_utc is not None else None
     logger = logging.getLogger("tart2ms")
     logger.setLevel(logging.INFO)
     ch = logging.StreamHandler()
@@ -150,7 +161,9 @@ if __name__ == "__main__":
                      writemodelcatalog=ARGS.writemodelcatalog,
                      fetch_sources=not ARGS.no_fetch_sources,
                      catalog_recache=ARGS.sources_recache,
-                     write_extragalactic_catalogs=not ARGS.no_celestial_sources)
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources,
+                     filter_end_utc=ARGS.timerange_end_utc,
+                     filter_start_utc=ARGS.timerange_start_utc)
 
     elif ARGS.hdf:
         logger.info("Getting Data from file: {}".format(ARGS.hdf))
@@ -163,7 +176,9 @@ if __name__ == "__main__":
                      writemodelcatalog=ARGS.writemodelcatalog,
                      fetch_sources=not ARGS.no_fetch_sources,
                      catalog_recache=ARGS.sources_recache,
-                     write_extragalactic_catalogs=not ARGS.no_celestial_sources)
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources,
+                     filter_end_utc=ARGS.timerange_end_utc,
+                     filter_start_utc=ARGS.timerange_start_utc)
 
     else:
         logger.info("Getting Data from API: {}".format(ARGS.api))
@@ -194,4 +209,6 @@ if __name__ == "__main__":
                      applycal=not ARGS.uncalibrated,
                      fill_model=ARGS.addmodel,
                      writemodelcatalog=ARGS.writemodelcatalog,
-                     write_extragalactic_catalogs=not ARGS.no_celestial_sources)
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources,
+                     filter_end_utc=ARGS.timerange_end_utc,
+                     filter_start_utc=ARGS.timerange_start_utc)
