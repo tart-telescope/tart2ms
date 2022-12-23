@@ -218,7 +218,7 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
             spi = np.zeros((len(sources_i), 1)) # flat spectrum
             reffreq = np.ones(len(sources_i)) * np.mean(spw_chan_freqs[spw_i])
             logspi = np.ones(len(sources_i), dtype=bool)
-            sel = map_row_to_zendir == dataset_i
+            sel = map_row_to_zendir.compute() == dataset_i            
             vis = wsclean_predict(uvw_data[sel, :],
                                     lm,
                                     source_type,

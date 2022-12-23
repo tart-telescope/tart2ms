@@ -202,7 +202,7 @@ def synthesize_uvw(station_ECEF, time, a1, a2,
                     [padded_uvw, padded_time, padded_a1, padded_a2]))
 
 
-def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1, sel=None):
+def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
     """
         Rephasor operator
         -- rephases a field to a new phase centre
@@ -210,17 +210,19 @@ def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1, sel=None):
         pos - tupple containing degree coordinates for RA and Dec for the epoch under consideration
         refdir - array of tuples with original field phase centres in RA and dec at the same epoch as pos (degrees), one per field
         phasesign - should be -1 for the NRAO baseline conventions
-        sel - (if not None same length as num rows) selects a portion of data in uvw, field_ids and vis
+        sel - selects a portion of data in uvw, field_ids and vis
     """
-    if sel is None:
-        sel = np.ones(vis.shape[0], dtype=bool)
     uniq_fields = np.unique(field_ids[sel])
-    if refdir.shape[0] != uniq_fields.size:
-        raise ValueError("Must have as many ref positions as unique fields")
+    if refdir.shape[0] < uniq_fields.size:
+        raise ValueError("Must have at least as many ref positions as unique fields")
     if refdir.shape[1] != 2:
         raise ValueError("ref must be shape nfield x 2")
     if pos.size != 2 and pos.shape[0] != 2:
         raise ValueError("pos must be shape 2")
+    if uvw.shape[0] != vis.shape[0]:
+        raise ValueError("UVW rows must be the same as vis rows")
+    if field_ids.shape[0] != vis.shape[0]:
+        raise ValueError("FIELD_ID rows must be the same as vis rows")
     for ifid, fid in enumerate(uniq_fields):
         selfid = field_ids[sel] == fid
         nrowsel = np.sum(selfid)
