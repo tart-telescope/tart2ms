@@ -1,0 +1,98 @@
+[
+    {
+        "name": "NCP",
+        "position": {
+            "RA": "00h00m00s",
+            "DEC": "90d00m00s",
+            "EQUINOX": "J2000",
+            "FRAME": "fk5"
+        }
+    },
+    {
+        "name": "SCP",
+        "position": {
+            "RA": "00h00m00s",
+            "DEC": "-90d00m00s",
+            "EQUINOX": "J2000",
+            "FRAME": "fk5"
+        }
+    },
+    {
+        "name": "SgrA*",
+        "position": {
+            "RA": "17h45m40.0409s",
+            "DEC": "-29d00m28.118s",
+            "EQUINOX": "J2000",
+            "FRAME": "fk5"
+        }
+    },
+    {
+        "name": "FornaxA",
+        "position": {
+            "RA": "03h22m41.7s",
+            "DEC": "-37d12m30s",
+            "EQUINOX": "J2000",
+            "FRAME": "fk5"
+        }
+    },
+    {
+        "name": "Mars",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Sun",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Moon",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Mercury",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Venus",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Mars",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Jupiter",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Saturn",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Uranus",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    },
+    {
+        "name": "Neptune",
+        "position": {
+            "FRAME": "Special Body"
+        }
+    }
+]

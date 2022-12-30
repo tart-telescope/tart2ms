@@ -202,7 +202,7 @@ def synthesize_uvw(station_ECEF, time, a1, a2,
                     [padded_uvw, padded_time, padded_a1, padded_a2]))
 
 
-def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1):
+def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1, sel=None):
     """
         Rephasor operator
         -- rephases a field to a new phase centre
@@ -210,22 +210,25 @@ def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1):
         pos - tupple containing degree coordinates for RA and Dec for the epoch under consideration
         refdir - array of tuples with original field phase centres in RA and dec at the same epoch as pos (degrees), one per field
         phasesign - should be -1 for the NRAO baseline conventions
+        sel - (if not None same length as num rows) selects a portion of data in uvw, field_ids and vis
     """
-    uniq_fields = np.unique(field_ids)
+    if sel is None:
+        sel = np.ones(vis.shape[0], dtype=bool)
+    uniq_fields = np.unique(field_ids[sel])
     if refdir.shape[0] != uniq_fields.size:
         raise ValueError("Must have as many ref positions as unique fields")
     if refdir.shape[1] != 2:
         raise ValueError("ref must be shape nfield x 2")
     if pos.size != 2 and pos.shape[0] != 2:
         raise ValueError("pos must be shape 2")
-    for fid in uniq_fields:
-        selfid = field_ids == fid
+    for ifid, fid in enumerate(uniq_fields):
+        selfid = field_ids[sel] == fid
         nrowsel = np.sum(selfid)
         cos = np.cos
         sin = np.sin
         sqrt = np.sqrt
         ra, dec = np.deg2rad(pos)
-        ra0, dec0 = np.deg2rad(refdir[fid])
+        ra0, dec0 = np.deg2rad(refdir[ifid])
         d_ra = ra - ra0
         d_dec = dec
         d_decp = dec0
@@ -241,15 +244,15 @@ def rephase(vis, freq, pos, uvw, refdir, field_ids, phasesign=-1):
 
         wl = np.tile((quanta.constants["c"].get_value() / freq), (nrowsel, 1))
         uvw_freq = np.zeros((nrowsel, freq.size, 3))
-        uvw_freq[:, :, 0] = uvw[selfid, 0].repeat(freq.size).reshape(nrowsel, freq.size) / wl
-        uvw_freq[:, :, 1] = uvw[selfid, 1].repeat(freq.size).reshape(nrowsel, freq.size) / wl
-        uvw_freq[:, :, 2] = uvw[selfid, 2].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:, :, 0] = uvw[sel][selfid, 0].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:, :, 1] = uvw[sel][selfid, 1].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:, :, 2] = uvw[sel][selfid, 2].repeat(freq.size).reshape(nrowsel, freq.size) / wl
 
         x = np.exp(phasesign * 2.0j * np.pi * (uvw_freq[:, :, 0] * ll +
                                                uvw_freq[:, :, 1] * mm +
                                                uvw_freq[:, :, 2] * nn))
         ncorr = vis.shape[2]
-        vis[selfid, :, :] *= x.repeat(ncorr).reshape(nrowsel, freq.size, ncorr)
+        vis[sel][selfid, :, :] *= x.repeat(ncorr).reshape(nrowsel, freq.size, ncorr)
 
     return vis
 

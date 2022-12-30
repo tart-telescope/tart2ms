@@ -8,10 +8,15 @@
 
     License. GPLv3.
 '''
+from datetime import datetime as dt
 import logging
 import json
 import h5py
 import dask
+from dask.diagnostics import ProgressBar
+#dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
+dask.config.set(scheduler='processes')  # overwrite default with threaded scheduler
+#dask.config.set(scheduler='synchronous')  # overwrite default with threaded scheduler
 import dateutil
 
 import dask.array as da
@@ -39,6 +44,7 @@ from tart.operation import settings
 from tart.imaging.visibility import Visibility
 from tart.imaging import (calibration,
                           elaz)
+from .catalogs import catalog_reader
 
 from tart_tools import (api_imaging,
                         api_handler)
@@ -49,8 +55,12 @@ from .fixvis import (fixms,
                      progress,
                      rephase)
 
-from .util import rayleigh_criterion
-from .ms_helper import azel2radec, predict_model
+from .util import (rayleigh_criterion,
+                   read_known_phasings)
+from .ms_helper import (azel2radec,
+                        predict_model,
+                        get_catalog_sources_azel,
+                        get_solar_system_bodies)
 
 LOGGER = logging.getLogger("tart2ms")
 LOGGER.setLevel(logging.INFO)
@@ -126,7 +136,7 @@ class MSTable:
     '''
         Little Helper to simplify writing a table.
     '''
-
+    __write_futures = []
     def __init__(self, ms_name, table_name):
         self.table_name = "::".join((ms_name, table_name))
         self.datasets = []
@@ -135,8 +145,19 @@ class MSTable:
         self.datasets.append(dataset)
 
     def write(self):
+        """ Creates a future to be computed 
+            ensure to call dask.compute with get_futures
+            to finalize graph construction
+        """
         writes = xds_to_table(self.datasets, self.table_name, columns="ALL")
-        dask.compute(writes)
+        self.__write_futures.append(writes)
+
+    @classmethod
+    def get_futures(cls):
+        """ returns a list of futures to be passed to dask.compute """
+        futures = cls.__write_futures
+        cls.__write_futures = []
+        return futures
 
 
 def timestamp_to_ms_epoch(t_stamp):
@@ -167,7 +188,8 @@ def ms_create(ms_table_name, info,
               uvw_generator='casacore',
               fill_model=True,
               writemodelcatalog=True,
-              sources_timestamps=None):
+              sources_timestamps=None,
+              write_extragalactic_catalogs=True):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -200,6 +222,7 @@ def ms_create(ms_table_name, info,
     None
 
     '''
+    start_time = time.time()
     try:
         loc = info['location']
     except Exception:
@@ -355,21 +378,52 @@ def ms_create(ms_table_name, info,
     for d in directions:
         LOGGER.info(f"    shapshot direction {d[0]}, {d[1]} {SkyCoord(d[0]*u.rad, d[1]*u.rad, frame='icrs').to_string('dms')}")
 
+    use_special_fn = None
     if phase_center_policy == "instantaneous-zenith":
         pass
+    elif isinstance(phase_center_policy, SkyCoord):
+        direction = np.deg2rad(np.array([[phase_center_policy.icrs.ra.value, 
+                                          phase_center_policy.icrs.dec.value]]).reshape(1, 2, 1))
     elif (phase_center_policy == "no-rephase-obs-midpoint") or \
          (phase_center_policy == "rephase-obs-midpoint"):
         direction = direction[:, :, direction.shape[2]//2].reshape(1, 2, 1)  # observation midpoint
-    elif phase_center_policy == "rephase-SCP":
-        direction = np.array([0, np.deg2rad(-90)]).reshape(1, 2, 1)
-    elif phase_center_policy == "rephase-NCP":
-        direction = np.array([0, np.deg2rad(90)]).reshape(1, 2, 1)
+    elif phase_center_policy.find("rephase-") == 0:
+        fn = phase_center_policy.replace("rephase-","")
+        use_special_fn = fn
+        # 3CRR currently only catalog with special names
+        catalog_positions = catalog_reader.catalog_factory.from_3CRR(fluxlim15=0.0)
+        named_positions = read_known_phasings()
+        fsrc = list(filter(lambda x: x.name == fn, catalog_positions))
+        if len(fsrc) > 0:
+            direction = np.array([[fsrc[0].rarad, fsrc[0].decrad]]).reshape(1, 2, 1)
+        else: # otherwise it is in the named positions list
+            fsrc = list(filter(lambda x: x['name'].upper() == fn, named_positions))
+            if len(fsrc) == 0:
+                raise RuntimeError(f"Unknown named source {fn}")
+            if fsrc[0]['position']['FRAME'] == "Special Body":
+                body = ac.get_body(fn, obstime[0], location=location)
+                LOGGER.critical(f"User caution: enabling non-sidereal tracking of '{fn}'. Indicated field centre will be "
+                                f"that of the first timestamp in your synthesized map, but W-coordinate will be actively "
+                                f"fringestopping at source position")
+                direction = np.deg2rad(np.array([[body.icrs.ra.value, body.icrs.dec.value]]).reshape(1, 2, 1))
+            else:
+                # we assume we can parse it with astropy
+                ra = fsrc[0]['position']["RA"]
+                dec = fsrc[0]['position']["DEC"]
+                equinox = fsrc[0]['position']["EQUINOX"]
+                frame = fsrc[0]['position']["FRAME"]
+                crd = SkyCoord(f"{ra} {dec}", equinox=equinox, frame=frame)
+                direction = np.deg2rad(np.array([[crd.icrs.ra.value, crd.icrs.dec.value]]).reshape(1, 2, 1))
     else:
         raise ValueError(f"phase_center_policy must be one of "
-                         f"['instantaneous-zenith','rephase-obs-midpoint','rephase-SCP','rephase-NCP',"
-                         f"'no-rephase-obs-midpoint'] got {phase_center_policy}")
-    field_name = da.asarray(np.array(list(map(__twelveball, direction.reshape(2, direction.shape[2]).T)),
-                                     dtype=object), chunks=1)
+                         f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint',"
+                         f"'rephase-<named position>' or Astropy.SkyCoord] got {phase_center_policy}")
+    if use_special_fn:
+        field_name = da.asarray(np.array([use_special_fn] * direction.shape[2]),
+                                dtype=object, chunks=1)
+    else:
+        field_name = da.asarray(np.array(list(map(__twelveball, direction.reshape(2, direction.shape[2]).T)),
+                                         dtype=object), chunks=1)
     field_direction = da.asarray(
         direction.T.reshape(direction.shape[2],
                             1, 2).copy(), chunks=(1, None, None))  # nrow x npoly x 2
@@ -398,6 +452,10 @@ def ms_create(ms_table_name, info,
 
     # ----------------------------- SOURCE datasets -------------------------- #
     if sources:
+        all_numlines = []
+        all_name = []
+        all_time = []
+        all_direction = []
         if len(epoch_s_sources) != len(sources):
             raise RuntimeError(
                 "If sources are specified then we expected epochs to be of same size as sources list")
@@ -420,13 +478,17 @@ def ms_create(ms_table_name, info,
                     [name], dtype=object), chunks=1)
                 dask_time = da.asarray(np.asarray(
                     [epoch_s_i], dtype=object), chunks=1)
-                dataset = Dataset({
-                    "NUM_LINES": (("row",), dask_num_lines),
-                    "NAME": (("row",), dask_name),
-                    "TIME": (("row",), dask_time),
-                    "DIRECTION": (("row", "dir"), dask_direction),
-                })
-                src_table.append(dataset)
+                all_numlines.append(dask_num_lines)
+                all_name.append(dask_name)
+                all_time.append(dask_time)
+                all_direction.append(dask_direction)
+        dataset = Dataset({
+            "NUM_LINES": (("row",), da.concatenate(all_numlines, axis=0).rechunk(-1)),
+            "NAME": (("row",), da.concatenate(all_name, axis=0).rechunk(-1)),
+            "TIME": (("row",), da.concatenate(all_time, axis=0).rechunk(-1)),
+            "DIRECTION": (("row", "dir"), da.concatenate(all_direction, axis=0).rechunk(-1)),
+        })
+        src_table.append(dataset)
 
     # Create POLARISATION datasets.
     # Dataset per output row required because column shapes are variable
@@ -513,7 +575,7 @@ def ms_create(ms_table_name, info,
     if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
         LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
                        f"for multi-timestamp databases. Your UVW coordinates will be wrong")
-    if uvw_generator == 'telescope_snapshot':
+    if uvw_generator == 'telescope_snapshot' and phase_center_policy == "instantaneous-zenith":
         bl_pos = np.array(ant_pos)[baselines]
         uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
         # Use the - sign to get the same orientation as our tart projections.
@@ -523,7 +585,8 @@ def ms_create(ms_table_name, info,
         uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
     else:
         raise ValueError(
-            'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
+            'uvw_generator expects either mode "telescope_snapshot" or "casacore". '
+            'Telescope snapshot mode can only be specified for instantaneous-zenith phasing')
 
     for ddid, (spw_id, pol_id) in enumerate(zip(spw_ids, pol_ids)):
         # Infer row, chan and correlation shape
@@ -579,17 +642,17 @@ def ms_create(ms_table_name, info,
             # to ensure we can rephase them to a common frame in the end
             field_no = scan.copy() - 1  # offset to start at 0 (FK)
         elif (phase_center_policy == 'no-rephase-obs-midpoint' or
-              phase_center_policy == 'rephase-obs-midpoint' or
-              phase_center_policy == 'rephase-NCP' or
-              phase_center_policy == 'rephase-SCP'):
+              isinstance(phase_center_policy, SkyCoord) or
+              'rephase-' in phase_center_policy):
             # user is just going to get a single zenith position at the observation centoid
             scan = np.ones(len(epoch_s), dtype=int).repeat(
                 nbl)  # start at 1, per convention
             field_no = np.zeros_like(scan)
         else:
             raise ValueError(f"phase_center_policy must be one of "
-                             f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint','rephase-SCP','rephase-NCP'] "
-                             f"got {phase_center_policy}")
+                         f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint',"
+                         f"'rephase-<named position>' or Astropy.SkyCoord] got {phase_center_policy}")
+        
 
         # apply rephasor if needed
         mean_sidereal_day = 23 + 56 / 60. + 4.0905 / 3600.  # hrs
@@ -612,6 +675,9 @@ def ms_create(ms_table_name, info,
                                                     zenith_directions.shape[2]).T.copy()
         map_row_to_zendir = np.arange(len(epoch_s), dtype=int).repeat(nbl)
         if uvw_generator == 'telescope_snapshot':
+            if isinstance(phase_center_policy, SkyCoord) or \
+               phase_center_policy.find('rephase-') >= 0: # rephase or non-rephase single field database
+               raise RuntimeError("Telescope snapshot UVW mode may only be used for zenethal snapshotting mode")
             bl_pos = np.array(ant_pos)[baselines]
             uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
             # Use the - sign to get the same orientation as our tart projections.
@@ -619,20 +685,42 @@ def ms_create(ms_table_name, info,
         elif uvw_generator == 'casacore':
             # need to generate UVW coordinates for zenith positions for the model prediction step
             # if enabled otherwise we can wait till the end (unless we rephase)
-            if phase_center_policy == 'rephase-obs-midpoint' or \
-               phase_center_policy == 'rephase-NCP' or \
-               phase_center_policy == 'rephase-SCP' or \
+            if isinstance(phase_center_policy, SkyCoord) or \
+               phase_center_policy.find('rephase-') == 0 or \
                fill_model:
                 # we must first have accurate uvw coordinates in each different zenith direction
-                if phase_center_policy == 'rephase-obs-midpoint':
+                if phase_center_policy == 'rephase-obs-midpoint' or phase_center_policy == 'no-rephase-obs-midpoint':
                     centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
                         1, 2)
-                elif phase_center_policy == 'rephase-NCP':
-                    centroid_direction = np.array(
-                        [0, np.deg2rad(+90)]).reshape(1, 2)
-                elif phase_center_policy == 'rephase-SCP':
-                    centroid_direction = np.array(
-                        [0, np.deg2rad(-90)]).reshape(1, 2)
+                elif isinstance(phase_center_policy, SkyCoord):
+                    centroid_direction = np.deg2rad(np.array([[phase_center_policy.icrs.ra.value, 
+                                                               phase_center_policy.icrs.dec.value]]).reshape(1, 2))
+                elif phase_center_policy.find("rephase-") == 0:
+                    fn = phase_center_policy.replace("rephase-","")
+                    # 3CRR currently only catalog with special names
+                    catalog_positions = catalog_reader.catalog_factory.from_3CRR(fluxlim15=0.0)
+                    named_positions = read_known_phasings()
+                    fsrc = list(filter(lambda x: x.name == fn, catalog_positions))
+                    if len(fsrc) > 0:
+                        centroid_direction = np.array([[fsrc[0].rarad, fsrc[0].decrad]]).reshape(1, 2)
+                    else: # otherwise it is in the named positions list
+                        fsrc = list(filter(lambda x: x['name'].upper() == fn, named_positions))
+                        if len(fsrc) == 0:
+                            raise RuntimeError(f"Unknown named source {fn}")
+                        if fsrc[0]['position']['FRAME'] == "Special Body":
+                            centroid_direction = np.empty((len(obstime), 2), dtype=float)
+                            for ti, tt in enumerate(obstime):
+                                body = ac.get_body(fn, tt, location=location)
+                                centroid_direction[ti, :] = np.deg2rad(np.array([body.icrs.ra.value, body.icrs.dec.value]))
+                        else:
+                            # we assume we can parse it with astropy
+                            ra = fsrc[0]['position']["RA"]
+                            dec = fsrc[0]['position']["DEC"]
+                            equinox = fsrc[0]['position']["EQUINOX"]
+                            frame = fsrc[0]['position']["FRAME"]
+                            crd = SkyCoord(f"{ra} {dec}", equinox=equinox, frame=frame)
+                            centroid_direction = np.deg2rad(np.array([[crd.icrs.ra.value,
+                                                                       crd.icrs.dec.value]]).reshape(1, 2))
                 elif phase_center_policy == "instantaneous-zenith":
                     centroid_direction = zenith_directions
                 else:
@@ -660,6 +748,7 @@ def ms_create(ms_table_name, info,
                                                          padded_uvw=padded_uvw["UVW"],
                                                          ack=False)
                     p.next()
+                LOGGER.info("<Done>")
             else:
                 # no model or rephasing --- we will wait to the end to fill zenith positions
                 uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
@@ -669,7 +758,6 @@ def ms_create(ms_table_name, info,
 
         np_uvw = uvw_array.reshape((row, 3))
         uvw_data = da.from_array(np_uvw)
-
         if phase_center_policy == 'no-rephase-obs-midpoint' and \
            obs_length > snapshot_length_cutoff:
             LOGGER.critical(f"You are choosing to set the field phase direction at the centre point "
@@ -682,6 +770,7 @@ def ms_create(ms_table_name, info,
                             f"of the instrument resolution during the course of this observation")
 
         if fill_model:
+            LOGGER.info(f"Predicting GNSS positions for {len(epoch_s)} timestamps")
             model_data = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
                                        uvw_data,
                                        epoch_s, spw_chan_freqs, spw_i,
@@ -690,43 +779,147 @@ def ms_create(ms_table_name, info,
                                        location,
                                        sources, epoch_s_sources, sources_obstime,
                                        writemodelcatalog)
+            if model_data is None:
+                model_data = da.zeros_like(dask_data)
+            cat_sources = get_catalog_sources_azel(obstime, location)
+            if write_extragalactic_catalogs:
+                LOGGER.info(f"Predicting celestial catalog positions for {len(epoch_s)} timestamps")
+                celestial_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+                                            uvw_data,
+                                            epoch_s, spw_chan_freqs, spw_i,
+                                            zenith_directions,
+                                            map_row_to_zendir,
+                                            location,
+                                            cat_sources, epoch_s, obstime,
+                                            writemodelcatalog,
+                                            filter_elevation=20.0,
+                                            append_catalog=True)
+                if celestial_model is None:
+                    celestial_model = da.zeros_like(dask_data)
+                model_data += celestial_model
+            LOGGER.info(f"Predicting Sun and Moon positions for {len(epoch_s)} timestamps")
+            cat_sources = get_solar_system_bodies(obstime, location)
+            solar_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+                                        uvw_data,
+                                        epoch_s, spw_chan_freqs, spw_i,
+                                        zenith_directions,
+                                        map_row_to_zendir,
+                                        location,
+                                        cat_sources, epoch_s, obstime,
+                                        writemodelcatalog,
+                                        filter_elevation=20.0,
+                                        append_catalog=True)
 
-        if phase_center_policy == 'rephase-obs-midpoint' or \
-           phase_center_policy == 'rephase-NCP' or \
-           phase_center_policy == 'rephase-SCP':
-            new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
-                                     frame='icrs')
-            new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
-                                 f"{new_phase_dir.dec.dms[0]:02.0f}d{abs(new_phase_dir.dec.dms[1]):02.0f}m{abs(new_phase_dir.dec.dms[2]):05.2f}s"
-            LOGGER.info("<Done>")
-            LOGGER.info(
-                f"Per user request: Rephase all data to {new_phase_dir_repr}")
-            rephased_data = da.empty_like(dask_data)
-            rephased_data = \
-                da.map_blocks(rephase,
-                              dask_data,
-                              dtype=dask_data.dtype,
-                              chunks=dask_data.chunks,
-                              # kwargs for rephase
-                              freq=spw_chan_freqs[spw_id],
-                              pos=np.rad2deg(centroid_direction[0, :]),
-                              uvw=uvw_data,
-                              refdir=np.rad2deg(zenith_directions),
-                              field_ids=map_row_to_zendir)
-            dask_data = rephased_data
-            if fill_model and sources:
+            if solar_model is None:
+                solar_model = da.zeros_like(dask_data)
+            model_data += solar_model
+            model_data.rechunk(dask_data.chunks)
+
+        if isinstance(phase_center_policy, SkyCoord) or \
+           phase_center_policy.find('rephase-') == 0:
+            if centroid_direction.shape[0] == 1: 
+                new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
+                                        frame='icrs')
+                new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
+                                    f"{new_phase_dir.dec.dms[0]:02.0f}d{abs(new_phase_dir.dec.dms[1]):02.0f}m{abs(new_phase_dir.dec.dms[2]):05.2f}s"
+                LOGGER.info(
+                    f"Per user request: Rephase all data to {new_phase_dir_repr}")
+                rephased_data = da.empty_like(dask_data)
                 rephased_data = \
                     da.map_blocks(rephase,
-                                  model_data,
-                                  dtype=model_data.dtype,
-                                  chunks=model_data.chunks,
-                                  # kwargs for rephase
-                                  freq=spw_chan_freqs[spw_id],
-                                  pos=np.rad2deg(centroid_direction[0, :]),
-                                  uvw=uvw_data,
-                                  refdir=np.rad2deg(zenith_directions),
-                                  field_ids=map_row_to_zendir)
-                model_data = rephased_data
+                                dask_data,
+                                dtype=dask_data.dtype,
+                                chunks=dask_data.chunks,
+                                # kwargs for rephase
+                                freq=spw_chan_freqs[spw_id],
+                                pos=np.rad2deg(centroid_direction[0, :]),
+                                uvw=uvw_data,
+                                refdir=np.rad2deg(zenith_directions),
+                                field_ids=map_row_to_zendir)
+                dask_data = rephased_data
+                rephased_data = da.empty_like(dask_data)
+                if fill_model:
+                    rephased_data = \
+                        da.map_blocks(rephase,
+                                    model_data,
+                                    dtype=model_data.dtype,
+                                    chunks=model_data.chunks,
+                                    # kwargs for rephase
+                                    freq=spw_chan_freqs[spw_id],
+                                    pos=np.rad2deg(centroid_direction[0, :]),
+                                    uvw=uvw_data,
+                                    refdir=np.rad2deg(zenith_directions),
+                                    field_ids=map_row_to_zendir)
+                    model_data = rephased_data
+            elif centroid_direction.shape[0] == len(obstime):
+                LOGGER.info(f"Per user request: Rephase data to special field {phase_center_policy.replace('rephase-','')} per timestamp")
+                rephased_data = da.zeros_like(dask_data)
+                subfields = np.unique(map_row_to_zendir)
+                p = progress(
+                    "Phasing data", max=subfields.size)
+                for sfi in subfields:
+                    sel = map_row_to_zendir == sfi
+                    rephased_data += \
+                        da.map_blocks(rephase,
+                                    dask_data,
+                                    dtype=dask_data.dtype,
+                                    chunks=dask_data.chunks,
+                                    # kwargs for rephase
+                                    freq=spw_chan_freqs[spw_id],
+                                    pos=np.rad2deg(centroid_direction[sfi, :]),
+                                    uvw=uvw_data,
+                                    refdir=np.rad2deg(zenith_directions[sfi, :].reshape(1, 2)),
+                                    field_ids=map_row_to_zendir,
+                                    sel=sel)
+                    p.next()
+                LOGGER.info("<Done>")
+                dask_data = rephased_data
+                if fill_model:
+                    rephased_data = da.zeros_like(dask_data)
+                    p = progress(
+                        "Phasing model data", max=subfields.size)
+                    for sfi in subfields:
+                        sel = map_row_to_zendir == sfi
+                        rephased_data += \
+                            da.map_blocks(rephase,
+                                        model_data,
+                                        dtype=model_data.dtype,
+                                        chunks=model_data.chunks,
+                                        # kwargs for rephase
+                                        freq=spw_chan_freqs[spw_id],
+                                        pos=np.rad2deg(centroid_direction[sfi, :]),
+                                        uvw=uvw_data,
+                                        refdir=np.rad2deg(zenith_directions[sfi, :].reshape(1, 2)),
+                                        field_ids=map_row_to_zendir,
+                                        sel=sel)
+                        p.next()
+                    LOGGER.info("<Done>")
+                    model_data = rephased_data
+
+                # regenerate UVW coordinates for special non-sidereal positions
+                p = progress(
+                    f"Computing UVW towards special field {phase_center_policy.replace('rephase-','')}", max=subfields.size)
+                uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
+                for sfi in subfields:
+                    selrow = map_row_to_zendir == sfi
+                    this_phase_dir = centroid_direction[sfi].reshape(1, 2)
+                    padded_uvw = synthesize_uvw(station_ECEF=antenna_itrf_pos.compute(),
+                                                time=timems[selrow],
+                                                a1=baselines[:, 0][selrow],
+                                                a2=baselines[:, 1][selrow],
+                                                phase_ref=this_phase_dir,
+                                                ack=False)
+                    uvw_array[selrow] = dense2sparse_uvw(a1=baselines[:, 0][selrow],
+                                                         a2=baselines[:, 1][selrow],
+                                                         time=timems[selrow],
+                                                         ddid=(
+                                                             np.ones(selrow.size)*ddid)[selrow],
+                                                         padded_uvw=padded_uvw["UVW"],
+                                                         ack=False)
+                    p.next()
+                LOGGER.info("<Done>")
+            else:
+                raise RuntimeError("Rephaseing centroids must be 1 or a centre per original zenith position") 
         else:
             LOGGER.info("No rephasing requested - field centers left as is")
 
@@ -756,41 +949,53 @@ def ms_create(ms_table_name, info,
             'OBSERVATION_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
             'STATE_ID': (("row",), da.from_array(np.zeros(row, dtype=int), chunks=chunks['row'])),
         }
-        if fill_model and sources:
+        if fill_model:
             main_table["MODEL_DATA"] = (dims, model_data)
         dataset = Dataset(main_table)
         ms_datasets.append(dataset)
 
     ms_writes = xds_to_table(ms_datasets, ms_table_name, columns="ALL")
+    # auxilary table futures creation
     spw_writes = xds_to_table(spw_datasets, spw_table_name, columns="ALL")
     ddid_writes = xds_to_table(ddid_datasets, ddid_table_name, columns="ALL")
+    for tt in [ant_table, feed_table, field_table, pol_table, obs_table, src_table]:
+        tt.write()
 
-    dask.compute(ms_writes)
+    # execute graph with futures
+    LOGGER.info("Synthesizing MS...")
+    with ProgressBar():
+        dask.compute([ms_writes + spw_writes + ddid_writes] + MSTable.get_futures())
 
-    ant_table.write()
-    feed_table.write()
-    field_table.write()
-    pol_table.write()
-    obs_table.write()
-    src_table.write()
-
-    dask.compute(spw_writes)
-    dask.compute(ddid_writes)
-
+    LOGGER.info("Performing finalization of UVW coordinates if needed")
     if uvw_generator == 'telescope_snapshot':
-        pass
+        pass # user has been warned about their choice -- this cannot be used when rephasing
     elif uvw_generator == 'casacore':
         # rephasing requires us to tilt w towards the rephased point on the sphere
         # this is also needed if we haven't generated zenithal points yet because we didn't predict
         # a model
-        if phase_center_policy == 'rephase-obs-midpoint' or \
-           phase_center_policy == 'rephase-NCP' or \
-           phase_center_policy == 'rephase-SCP' or \
-           not fill_model:
-            fixms(ms_table_name)
+        if isinstance(phase_center_policy, str):
+            fn = phase_center_policy.replace("rephase-","")
+            fsrc = list(filter(lambda x: x['name'].upper() == fn and
+                                        x['position']["FRAME"] == "Special Body",
+                            read_known_phasings()))
+            is_special_body = len(fsrc) > 0
+        elif isinstance(phase_center_policy, SkyCoord):
+            is_special_body = False
+        else:
+            raise ValueError("Invalid type for phase_centre_policy - expect string or SkyCoord")
+        single_field = isinstance(phase_center_policy, SkyCoord) or \
+                       phase_center_policy.find('rephase-') == 0 or \
+                       phase_center_policy == "no-rephase-obs-midpoint"      
+        if not is_special_body: # non-sidereal tracking fields have their UVW computed per timestamp due to change in RA,DEC
+            if (single_field or # non-zeniths for which UVW are needed
+                (not single_field and not fill_model)): # zeniths not yet computed - no model predicts happened
+                fixms(ms_table_name)
     else:
         raise ValueError(
             'uvw_generator expects either mode "telescope_snapshot" or "casacore"')
+    end_time = time.time()
+    elapsed = (end_time - start_time)
+    LOGGER.info(f"Measurement set writing complete. Took {elapsed // 60:.0f}m{elapsed % 60.:.2f}s")
     
 def __print_infodict_keys(dico_info, keys, just=25):
     LOGGER.info("Observatory parameters:")
@@ -802,7 +1007,8 @@ def __print_infodict_keys(dico_info, keys, just=25):
 def __fetch_sources(timestamps, observer_lat, observer_lon, 
                     retry=5, retry_time=1, force_recache=False, 
                     filter_elevation=45.,
-                    filter_name=r"(?:^GPS.*)|(?:^QZS.*)"):    
+                    filter_name=r"(?:^GPS.*)|(?:^QZS.*)",
+                    downsample=30.0):    
     cache_dir = os.path.join(".", ".tartcache")
     if not os.path.exists(cache_dir):
         os.mkdir(cache_dir)
@@ -810,11 +1016,18 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
     LOGGER.info("Going online to retrieve updated GNSS TLS")
     ncache_objs = 0
     sources = []
-    for tt in timestamps:
+    downsampletimes = list(map(lambda t: dt.fromtimestamp(t),
+                                np.linspace(time.mktime(np.min(timestamps).timetuple()), 
+                                            time.mktime(np.max(timestamps).timetuple()),
+                                            max(1,
+                                                int(np.ceil((np.max(timestamps) - 
+                                                        np.min(timestamps)).total_seconds() / downsample))))))
+    for tt in downsampletimes:
         nretry = 0
         cat_url = api.catalog_url(lon=observer_lon,
                                   lat=observer_lat,
-                                  datestr=tt.isoformat())
+                                  datestr=tt.isoformat()) + \
+                f"&elevation={filter_elevation}"
         cache_file = os.path.join(cache_dir,
                                   sha256(cat_url.encode()).hexdigest())
         if not force_recache:
@@ -844,12 +1057,13 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
         else:
             LOGGER.critical(f"Failed to retrieve GNSS TLS from '{cat_url}'. "
                             f"Source information will be unavailable and prediction will not return a useful model")
-            return None
-    LOGGER.info(f"GNSS source catalogs retrieved for {len(timestamps)} timestamps, {ncache_objs} from local cache")
-    return sources
+            return None, downsampletimes
+    LOGGER.info(f"GNSS source catalogs retrieved for {len(downsampletimes)} timestamps, {ncache_objs} from local cache")
+    return sources, downsampletimes
 
 def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore",
-                 applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False):
+                 applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
+                 write_extragalactic_catalogs=True, filter_start_utc=None, filter_end_utc=None):
     if pol2:
         pol_feeds = ['RR', 'LL']
     else:
@@ -867,6 +1081,8 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
 
     p = progress("Processing HDF database", max=len(h5file))
     all_sources = []
+    all_sources_timestamps = []
+    tscount = 0
     for ih5, h5 in enumerate(h5file):
         with h5py.File(h5, "r") as h5f:
             config_string = np.string_(h5f['config'][0]).decode('UTF-8')
@@ -926,7 +1142,11 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
             timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
 
             hdf_vis = h5f['vis'][:]
+            
             for ts, v in zip(timestamps, hdf_vis):
+                if filter_start_utc and ts < filter_start_utc: continue
+                if filter_end_utc and ts > filter_end_utc: continue
+                tscount += 1
                 vis = Visibility(config=config, timestamp=ts)
                 vis.set_visibilities(v=v, b=hdf_baselines.tolist())
                 vis.phase_el = hdf_phase_elaz[0]
@@ -951,14 +1171,17 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 lon = config_json.get("lon", None)
                 if lat is None or lon is None:
                     raise RuntimeError("Telescope location is unavailable from the provided databases")
-                online_sources = __fetch_sources(timestamps=timestamps, 
+                online_sources, online_sources_timestamps = __fetch_sources(timestamps=timestamps, 
                                                  observer_lat=lat,
                                                  observer_lon=lon,
                                                  force_recache=catalog_recache) 
-                all_sources += online_sources if online_sources is not None else [None] * len(timestamps)
+                all_sources += online_sources if online_sources is not None else [None] * len(online_sources_timestamps)
+                all_sources_timestamps += online_sources_timestamps
         p.next()
-
     LOGGER.info("<Done>")
+    if tscount == 0:
+        raise RuntimeError("Time filtering criteria resulted in an empty database. Goodbye!")
+
     # finally create concat ms
     all_vis = np.array(all_vis).flatten()
     all_baselines = np.array(all_baselines)
@@ -970,16 +1193,19 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
               timestamps=all_times,
               pol_feeds=pol_feeds,
               sources=all_sources,
+              sources_timestamps=all_sources_timestamps,
               phase_center_policy=phase_center_policy,
               override_telescope_name=override_telescope_name,
               uvw_generator=uvw_generator,
               fill_model=fill_model,
-              writemodelcatalog=writemodelcatalog)
+              writemodelcatalog=writemodelcatalog,
+              write_extragalactic_catalogs=write_extragalactic_catalogs)
 
 
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name,
                  uvw_generator="casacore", json_data=None, applycal=True, fill_model=False,
-                 writemodelcatalog=True, fetch_sources=True, catalog_recache=False):
+                 writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
+                 write_extragalactic_catalogs=True, filter_start_utc=None, filter_end_utc=None):
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
@@ -1000,9 +1226,11 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
     all_times = []
     all_vis = []
     all_sources = []
+    all_sources_timestamps = []
     all_baselines = []
     ant_pos_orig = None
     orig_dico_info = None
+    tscount = 0
     p = progress("Processing JSON database", max=len(json_data))
     for ijdi, jdi in enumerate(json_data):
         info = jdi['info']
@@ -1059,33 +1287,42 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
             vis_json, source_json = d
             cal_vis, timestamp = api_imaging.vis_calibrated(
                 vis_json, config, gains, phases, [])
+            if filter_start_utc and timestamp < filter_start_utc.replace(tzinfo=timestamp.tzinfo): continue
+            if filter_end_utc and timestamp > filter_end_utc.replace(tzinfo=timestamp.tzinfo): continue
+            tscount += 1
             if fetch_sources:
                 lat = info["info"]["location"].get("lat", info["info"].get("lat", None))
                 lon = info["info"]["location"].get("lon", info["info"].get("lon", None))
                 if lat is None or lon is None:
                     raise RuntimeError("Telescope location is unavailable from the provided databases")
-                online_list = __fetch_sources(timestamps=[timestamp], 
-                                              observer_lat=lat,
-                                              observer_lon=lon,
-                                              force_recache=catalog_recache)
+                online_list, online_timestamps = __fetch_sources(timestamps=[timestamp], 
+                                                                 observer_lat=lat,
+                                                                 observer_lon=lon,
+                                                                 force_recache=catalog_recache)
                 src_list = source_json if not online_list else online_list[0]
+                online_timestamps = [timestamp] if not online_list else online_timestamps
             else:
                 src_list = source_json
+                online_timestamps = [timestamp]
             # a list of sources per timestamp so we can zip them correctly
             all_sources.append(src_list)
-        if pol2:
-            pol_feeds = ['RR', 'LL']
-        else:
-            pol_feeds = ['RR']
+            all_sources_timestamps.append(online_timestamps)
+            if pol2:
+                pol_feeds = ['RR', 'LL']
+            else:
+                pol_feeds = ['RR']
 
-        vis_data, baselines = cal_vis.get_all_visibility()
-        vis_array = np.array(vis_data, dtype=np.complex64)
-        all_vis.append(vis_array)
-        for bl in baselines:
-            all_baselines.append(bl)
-        all_times.append(timestamp)
+            vis_data, baselines = cal_vis.get_all_visibility()
+            vis_array = np.array(vis_data, dtype=np.complex64)
+            all_vis.append(vis_array)
+            for bl in baselines:
+                all_baselines.append(bl)
+            all_times.append(timestamp)
         p.next()
     LOGGER.info("<Done>")
+    if tscount == 0:
+        raise RuntimeError("Time filtering criteria resulted in an empty database. Goodbye!")
+
     __print_infodict_keys(orig_dico_info,
                           ["L0_frequency", "bandwidth", "baseband_frequency",
                            "operating_frequency", "name", "num_antenna",
@@ -1105,4 +1342,5 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
               override_telescope_name=override_telescope_name,
               uvw_generator=uvw_generator,
               fill_model=fill_model,
-              writemodelcatalog=writemodelcatalog)
+              writemodelcatalog=writemodelcatalog,
+              write_extragalactic_catalogs=write_extragalactic_catalogs)

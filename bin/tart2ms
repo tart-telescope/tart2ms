@@ -4,7 +4,9 @@
 #
 import os
 import shutil
-import json
+
+from datetime import datetime as dt
+import time
 
 import argparse
 import logging
@@ -13,8 +15,9 @@ from tart_tools import api_handler
 from tart_tools import api_imaging
 from tart.operation import settings
 
-from tart2ms import ms_from_json, ms_from_hdf5
+from tart2ms import ms_from_json, ms_from_hdf5, util
 from datetime import datetime as dt
+from tart2ms.catalogs.catalog_reader import catalog_factory
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
@@ -38,7 +41,7 @@ if __name__ == "__main__":
     
     '''
     New CLI:    --rephase <target> Perform rephasing of _all_ input visibility snapshots (single integration visibility fields) to the specified phase center.
-                                   This does not change the number of fields that will be output. There will be one field with name J_XXXXXX per visibility integration.
+                                   This does not change the number of scans that will be output. There will be one field with name J_XXXXXX.
 
                 --single-field     Merge all the fields into a single field with a common phase center. This means that imaging software will image just this one field by default
                                    Useful for deep imaging.
@@ -48,12 +51,19 @@ if __name__ == "__main__":
                             instantaneous-zenith    : Default options. Each snapshot is a separate field
                             rephase-obs-midpoint    : --rephase obs-midpoint --single-field
                             no-rephase-obs-midpoint : --single-field   
-                            rephase-SCP             : --rephase SCP --single-field
-                            rephase-NCP             : --rephase NCP --single-field
+                            <another known position>: --rephase <known position> --single-field
+    
+    Other known positions are read from named_phasings and from catalogs e.g. 3C sources
+    They may also be special bodies like Sun or Moon.
     '''
+    catalog_positions = catalog_factory.from_3CRR(fluxlim15=0.0)
+    named_positions = util.read_known_phasings()
+    specpos = list(map(lambda s: s.name, catalog_positions)) + \
+              list(map(lambda s: s['name'], named_positions))
     parser.add_argument('--rephase', required=False, default=None,
-                        choices=['obs-midpoint', 'SCP', 'NCP'],
-                        help="Rephase all visibilities to a new phase center")
+                        help=f"Rephase all visibilities to a new phase center. 'obs-midpoint' rephases to the zenith at the observation "
+                             f"midpoint for the provided databases. Otherwise another known position can be given or a twelve digit J2000 epoch coordinate "
+                             f"(e.g. J193900-632400). Currently recognized special positions are: {','.join(specpos)}")
     parser.add_argument('--single-field', action="store_true",
                         help="Write out single phase center for all observations")   
     parser.add_argument('--telescope_name', dest="override_telescope_name", required=False, default="TART",
@@ -66,10 +76,20 @@ if __name__ == "__main__":
                         help="Write a catalog of GNSS sources in Tigger LSM format to the current path. Only of use in combination with --add-model")
     parser.add_argument("--skip-online-source-catalog", dest="no_fetch_sources", required=False, action="store_true",
                         help="Skips fetching a catalog of GNSS sources online (not recommended for HDF5 based loading)")
+    parser.add_argument("--skip-celestial-source-catalog", dest="no_celestial_sources", required=False, action="store_true",
+                        help="Skips predicting stronger celestial source prediction from 3CRR, etc. catalogs")
     parser.add_argument("--no-cache", dest="sources_recache", required=False, action="store_true",
                         help="Ignores GNSS sources already cached from a previous run")
+    parser.add_argument('--timerange-start-utc', dest="timerange_start_utc", required=False, default=None,
+                        help="Include only timestamps after this UTC time, e.g. 2022-03-23T21:08:12")
+    parser.add_argument('--timerange-end-utc', dest="timerange_end_utc", required=False, default=None,
+                        help="Include only timestamps before this UTC time, e.g. 2022-03-23T23:30:12")
     
     ARGS = parser.parse_args()
+    def __parsedateISO8601(x):
+        return dt(*time.strptime(x, "%Y-%m-%dT%H:%M:%S")[:6])
+    ARGS.timerange_start_utc = __parsedateISO8601(ARGS.timerange_start_utc) if ARGS.timerange_start_utc is not None else None
+    ARGS.timerange_end_utc = __parsedateISO8601(ARGS.timerange_end_utc) if ARGS.timerange_end_utc is not None else None
     logger = logging.getLogger("tart2ms")
     logger.setLevel(logging.INFO)
     ch = logging.StreamHandler()
@@ -93,19 +113,25 @@ if __name__ == "__main__":
         logger.info("Raw data is being written to the database per user request")
  
     if ARGS.single_field or ARGS.rephase:
-        if ARGS.rephase == "SCP":
-            phase_center_policy = "rephase-SCP"
-        elif ARGS.rephase == "NCP":
-            phase_center_policy = "rephase-NCP"
-        elif ARGS.rephase == "obs-midpoint":
+        # read special positions from catalogs
+        # currently only 3CRR catalog contains named special positions
+        if ARGS.rephase == "obs-midpoint":
             phase_center_policy = "rephase-obs-midpoint"
         elif ARGS.rephase is None:
             phase_center_policy = "no-rephase-obs-midpoint"
             logger.critical("Warning: No rephasing is being done. Use with caution.")
             logger.critical("         The phase center will be selected as the observation midpoint. Ensure that the sky moves a small fraction")
             logger.critical("         of the instrument resolution (ie. should only be used for very short snapshot observations")
+        elif ARGS.rephase.upper() in map(lambda x: x.upper(),
+                                          list(map(lambda s: s.name, catalog_positions)) + 
+                                          list(map(lambda s: s['name'], named_positions))):
+            phase_center_policy = f"rephase-{ARGS.rephase.upper()}"
         else:
-            raise ValueError(f"Unknown rephase target {ARGS.rephase}")
+            # finally try accept twelveball name
+            rephase_coord = util.read_coordinate_twelveball(ARGS.rephase.upper())
+            if rephase_coord is None:
+                raise ValueError(f"Unknown rephase target {ARGS.rephase}")
+            phase_center_policy = rephase_coord
     else:  # single-field is False
         phase_center_policy = "instantaneous-zenith"
         
@@ -134,8 +160,10 @@ if __name__ == "__main__":
                      fill_model=ARGS.addmodel,
                      writemodelcatalog=ARGS.writemodelcatalog,
                      fetch_sources=not ARGS.no_fetch_sources,
-                     catalog_recache=ARGS.sources_recache)
-        logger.info("Measurement set writing complete.")
+                     catalog_recache=ARGS.sources_recache,
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources,
+                     filter_end_utc=ARGS.timerange_end_utc,
+                     filter_start_utc=ARGS.timerange_start_utc)
 
     elif ARGS.hdf:
         logger.info("Getting Data from file: {}".format(ARGS.hdf))
@@ -147,8 +175,10 @@ if __name__ == "__main__":
                      fill_model=ARGS.addmodel,
                      writemodelcatalog=ARGS.writemodelcatalog,
                      fetch_sources=not ARGS.no_fetch_sources,
-                     catalog_recache=ARGS.sources_recache)
-        logger.info("Measurement set writing complete.")
+                     catalog_recache=ARGS.sources_recache,
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources,
+                     filter_end_utc=ARGS.timerange_end_utc,
+                     filter_start_utc=ARGS.timerange_start_utc)
 
     else:
         logger.info("Getting Data from API: {}".format(ARGS.api))
@@ -178,5 +208,7 @@ if __name__ == "__main__":
                      ARGS.override_telescope_name, json_data=json_data,
                      applycal=not ARGS.uncalibrated,
                      fill_model=ARGS.addmodel,
-                     writemodelcatalog=ARGS.writemodelcatalog)
-        logger.info("Measurement set writing complete.")
+                     writemodelcatalog=ARGS.writemodelcatalog,
+                     write_extragalactic_catalogs=not ARGS.no_celestial_sources,
+                     filter_end_utc=ARGS.timerange_end_utc,
+                     filter_start_utc=ARGS.timerange_start_utc)

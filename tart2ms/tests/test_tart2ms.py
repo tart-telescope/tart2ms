@@ -34,7 +34,8 @@ class TestTart2MS(unittest.TestCase):
         ms_from_json(test_ms, TEST_JSON, pol2=False,
                      phase_center_policy='instantaneous-zenith',
                      override_telescope_name='TART',
-                     uvw_generator="telescope_snapshot")
+                     uvw_generator="telescope_snapshot",
+                     fetch_sources=False)
 
     def setUp(self):
         with open(TEST_JSON, 'r') as json_file:
@@ -99,7 +100,8 @@ class TestTart2MS(unittest.TestCase):
         ms_from_hdf5(ms_name='test_h5.ms', h5file=TEST_H5, pol2=False,
                      phase_center_policy='instantaneous-zenith',
                      override_telescope_name='TART',
-                     uvw_generator="telescope_snapshot")
+                     uvw_generator="telescope_snapshot",
+                     fetch_sources=False)
 
         self.assertTrue(True)
 
@@ -110,7 +112,8 @@ class TestTart2MS(unittest.TestCase):
                      override_telescope_name='TART',
                      uvw_generator="telescope_snapshot",
                      fill_model=True,
-                     writemodelcatalog=True)
+                     writemodelcatalog=True,
+                     fetch_sources=False)
         from pyrap.tables import table as tbl
         with tbl(test_ms) as tt:
             self.assertTrue("MODEL_DATA" in tt.colnames())
