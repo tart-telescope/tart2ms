@@ -254,7 +254,7 @@ def ms_create(ms_table_name, info,
                                            height=loc['alt']*u.m,
                                            ellipsoid='WGS84')
     obstime = Time(timestamps)
-    sources_obstime = Time(sources_timestamps)
+    sources_obstime = Time(sources_timestamps) if sources_timestamps else obstime
     LOGGER.debug(f"obstime {obstime}")
 
     # local_frame = AltAz(obstime=obstime, location=location)
