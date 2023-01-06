@@ -862,8 +862,6 @@ def ms_create(ms_table_name, info,
                 LOGGER.info(f"Per user request: Rephase data to special field {phase_center_policy.replace('rephase-','')} per timestamp")
                 rephased_data = da.zeros_like(dask_data)
                 subfields = np.unique(map_row_to_zendir)
-                p = progress(
-                    "Phasing data", max=subfields.size)
                 for sfi in subfields.compute():
                     sel = map_row_to_zendir == sfi
                     rephased_data += \
@@ -877,13 +875,9 @@ def ms_create(ms_table_name, info,
                                      pos=np.rad2deg(centroid_direction[sfi, :]),
                                      refdir=np.rad2deg(zenith_directions[sfi, :].reshape(1, 2)),
                                      dtype=dask_data.dtype)
-                    p.next()
-                LOGGER.info("<Done>")
                 dask_data = rephased_data
                 if fill_model:
                     rephased_data = da.zeros_like(dask_data)
-                    p = progress(
-                        "Phasing model data", max=subfields.size)
                     for sfi in subfields.compute():
                         sel = map_row_to_zendir == sfi
                         rephased_data += \
@@ -897,13 +891,11 @@ def ms_create(ms_table_name, info,
                                          pos=np.rad2deg(centroid_direction[sfi, :]),
                                          refdir=np.rad2deg(zenith_directions[sfi, :].reshape(1, 2)),
                                          dtype=model_data.dtype)
-                        p.next()
-                    LOGGER.info("<Done>")
                     model_data = rephased_data
 
                 # regenerate UVW coordinates for special non-sidereal positions
                 p = progress(
-                    f"Computing UVW towards special field {phase_center_policy.replace('rephase-','')}", max=subfields.size)
+                    f"Computing UVW towards special field {phase_center_policy.replace('rephase-','')}", max=subfields.compute().size)
                 uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
                 for sfi in subfields.compute():
                     selrow = map_row_to_zendir.compute() == sfi
@@ -922,6 +914,7 @@ def ms_create(ms_table_name, info,
                                                          padded_uvw=padded_uvw["UVW"],
                                                          ack=False)
                     p.next()
+                uvw_data = da.from_array(np_uvw, chunks=(chunks['row'], 3))
                 LOGGER.info("<Done>")
             else:
                 raise RuntimeError("Rephaseing centroids must be 1 or a centre per original zenith position") 
@@ -1013,7 +1006,7 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
                     retry=5, retry_time=1, force_recache=False, 
                     filter_elevation=45.,
                     filter_name=r"(?:^GPS.*)|(?:^QZS.*)",
-                    downsample=30.0):    
+                    downsample=10.0):    
     cache_dir = os.path.join(".", ".tartcache")
     if not os.path.exists(cache_dir):
         os.mkdir(cache_dir)

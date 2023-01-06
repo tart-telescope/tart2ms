@@ -212,6 +212,7 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
         phasesign - should be -1 for the NRAO baseline conventions
         sel - selects a portion of data in uvw, field_ids and vis
     """
+    vis_rephase = np.zeros_like(vis)
     uniq_fields = np.unique(field_ids[sel])
     if refdir.shape[0] < uniq_fields.size:
         raise ValueError("Must have at least as many ref positions as unique fields")
@@ -224,7 +225,7 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
     if field_ids.shape[0] != vis.shape[0]:
         raise ValueError("FIELD_ID rows must be the same as vis rows")
     for ifid, fid in enumerate(uniq_fields):
-        selfid = field_ids[sel] == fid
+        selfid = np.logical_and(field_ids == fid, sel)
         nrowsel = np.sum(selfid)
         cos = np.cos
         sin = np.sin
@@ -246,17 +247,17 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
 
         wl = np.tile((quanta.constants["c"].get_value() / freq), (nrowsel, 1))
         uvw_freq = np.zeros((nrowsel, freq.size, 3))
-        uvw_freq[:, :, 0] = uvw[sel][selfid, 0].repeat(freq.size).reshape(nrowsel, freq.size) / wl
-        uvw_freq[:, :, 1] = uvw[sel][selfid, 1].repeat(freq.size).reshape(nrowsel, freq.size) / wl
-        uvw_freq[:, :, 2] = uvw[sel][selfid, 2].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:, :, 0] = uvw[selfid, 0].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:, :, 1] = uvw[selfid, 1].repeat(freq.size).reshape(nrowsel, freq.size) / wl
+        uvw_freq[:, :, 2] = uvw[selfid, 2].repeat(freq.size).reshape(nrowsel, freq.size) / wl
 
         x = np.exp(phasesign * 2.0j * np.pi * (uvw_freq[:, :, 0] * ll +
                                                uvw_freq[:, :, 1] * mm +
                                                uvw_freq[:, :, 2] * nn))
         ncorr = vis.shape[2]
-        vis[sel][selfid, :, :] *= x.repeat(ncorr).reshape(nrowsel, freq.size, ncorr)
-
-    return vis
+        vis_rephase[selfid, :, :] = vis[selfid, :, :] * x.repeat(ncorr).reshape(nrowsel, freq.size, ncorr)
+    
+    return vis_rephase
 
 
 def fixms(msname, ack=True):
