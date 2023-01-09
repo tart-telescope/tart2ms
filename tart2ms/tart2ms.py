@@ -259,10 +259,9 @@ def ms_create(ms_table_name, info,
 
     # local_frame = AltAz(obstime=obstime, location=location)
     # LOGGER.info(f"local_frame {local_frame}")
-
     phase_altaz = SkyCoord(alt=[90.0*u.deg]*len(obstime), az=[0.0*u.deg]*len(obstime),
                            obstime=obstime, frame='altaz', location=location)
-    phase_j2000 = phase_altaz.transform_to('fk5')
+    phase_j2000 = phase_altaz.transform_to('icrs')
     LOGGER.debug(f"phase_j2000 {phase_j2000}")
 
     # Get the stokes enums for the polarization types
@@ -432,7 +431,6 @@ def ms_create(ms_table_name, info,
     # zeroth order polynomial in time for phase center.
     field_num_poly = da.zeros(direction.shape[2], chunks=direction.shape[2])
     dir_dims = ("row", 'field-poly', 'field-dir',)
-
     dataset = Dataset({
         'PHASE_DIR': (dir_dims, field_direction),
         'DELAY_DIR': (dir_dims, field_direction),
@@ -673,7 +671,7 @@ def ms_create(ms_table_name, info,
         zenith_directions = np.array(
             [[phase_j2000.ra.radian, phase_j2000.dec.radian]])
         zenith_directions = zenith_directions.reshape(zenith_directions.shape[1],
-                                                    zenith_directions.shape[2]).T.copy()
+                                                      zenith_directions.shape[2]).T.copy()
         map_row_to_zendir = da.from_array(np.arange(len(epoch_s), dtype=int).repeat(nbl), chunks=chunks['row'])
         if uvw_generator == 'telescope_snapshot':
             if isinstance(phase_center_policy, SkyCoord) or \
@@ -726,7 +724,7 @@ def ms_create(ms_table_name, info,
                     centroid_direction = zenith_directions
                 else:
                     raise RuntimeError("Invalid rephase option")
-
+                
                 subfields = da.unique(map_row_to_zendir).compute()
                 assert zenith_directions.shape[0] == subfields.size
                 p = progress(
@@ -873,7 +871,7 @@ def ms_create(ms_table_name, info,
                                      # kwargs for rephase
                                      freq=spw_chan_freqs[spw_id],
                                      pos=np.rad2deg(centroid_direction[sfi, :]),
-                                     refdir=np.rad2deg(zenith_directions[sfi, :].reshape(1, 2)),
+                                     refdir=np.rad2deg(zenith_directions),
                                      dtype=dask_data.dtype)
                 dask_data = rephased_data
                 if fill_model:
@@ -889,7 +887,7 @@ def ms_create(ms_table_name, info,
                                          # kwargs for rephase
                                          freq=spw_chan_freqs[spw_id],
                                          pos=np.rad2deg(centroid_direction[sfi, :]),
-                                         refdir=np.rad2deg(zenith_directions[sfi, :].reshape(1, 2)),
+                                         refdir=np.rad2deg(zenith_directions),
                                          dtype=model_data.dtype)
                     model_data = rephased_data
 

@@ -174,7 +174,7 @@ def synthesize_uvw(station_ECEF, time, a1, a2,
     for ti, t in enumerate(unique_time):
         if ack:
             p.next()
-        epoch = dm.epoch("UT1", quantity(t, "s"))
+        epoch = dm.epoch(time_TZ, quantity(t, "s"))
         dm.do_frame(epoch)
 
         station_uv = np.zeros_like(station_ECEF)
@@ -214,7 +214,7 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
     """
     vis_rephase = np.zeros_like(vis)
     uniq_fields = np.unique(field_ids[sel])
-    if refdir.shape[0] < uniq_fields.size:
+    if refdir.shape[0] < uniq_fields.max() if uniq_fields.size > 0 else 0:
         raise ValueError("Must have at least as many ref positions as unique fields")
     if refdir.shape[1] != 2:
         raise ValueError("ref must be shape nfield x 2")
@@ -231,8 +231,8 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
         sin = np.sin
         sqrt = np.sqrt
         ra, dec = np.deg2rad(pos)
-        ra0, dec0 = np.deg2rad(refdir[ifid])
-        d_ra = ra - ra0
+        ra0, dec0 = np.deg2rad(refdir[fid])
+        d_ra = (ra - ra0)
         d_dec = dec
         d_decp = dec0
         c_d_dec = cos(d_dec)
@@ -243,7 +243,7 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
         s_d_decp = sin(d_decp)
         ll = c_d_dec * s_d_ra
         mm = (s_d_dec * c_d_decp - c_d_dec * s_d_decp * c_d_ra)
-        nn = -(1 - sqrt(1 - ll * ll - mm * mm))
+        nn = s_d_dec * s_d_decp + c_d_dec * c_d_decp * c_d_ra - 1.0
 
         wl = np.tile((quanta.constants["c"].get_value() / freq), (nrowsel, 1))
         uvw_freq = np.zeros((nrowsel, freq.size, 3))
