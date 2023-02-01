@@ -6,4 +6,3 @@ astropy>=4.3
 numpy>=1.21
 h5py>=3.7
 progress>=1.6
-codex-africanus>=0.3.2

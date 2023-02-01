@@ -92,6 +92,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.5.0b2 Make prediction an optional dependency to remove codex-africanus from requirements.
 - 0.5.0b1 Add model prediction
           Add automatic catalog download
 - 0.4.0b3 Use the new catalog url functions from tart_tools
