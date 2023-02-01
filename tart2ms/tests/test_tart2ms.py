@@ -15,6 +15,12 @@ from tart_tools import api_imaging
 
 from tart2ms import ms_from_json, ms_from_hdf5, read_ms
 
+AFRICANUS_DFT_AVAIL = True
+try:
+    from africanus.rime.dask import wsclean_predict
+    from africanus.coordinates.dask import radec_to_lm
+except ImportError:
+    AFRICANUS_DFT_AVAIL = False
 
 TEST_H5 = './test_data/vis_2021-03-25_20_50_23.568474.hdf'
 TEST_JSON = 'tart2ms/tests/data_test.json'
@@ -106,14 +112,17 @@ class TestTart2MS(unittest.TestCase):
         self.assertTrue(True)
 
     def test_model_predict(self, test_ms="test_json_with_model.ms"):
-        shutil.rmtree(test_ms, ignore_errors=True)
-        ms_from_json(test_ms, TEST_JSON, pol2=False,
-                     phase_center_policy='instantaneous-zenith',
-                     override_telescope_name='TART',
-                     uvw_generator="telescope_snapshot",
-                     fill_model=True,
-                     writemodelcatalog=True,
-                     fetch_sources=False)
-        from pyrap.tables import table as tbl
-        with tbl(test_ms) as tt:
-            self.assertTrue("MODEL_DATA" in tt.colnames())
+        if AFRICANUS_DFT_AVAIL:
+            shutil.rmtree(test_ms, ignore_errors=True)
+            ms_from_json(test_ms, TEST_JSON, pol2=False,
+                        phase_center_policy='instantaneous-zenith',
+                        override_telescope_name='TART',
+                        uvw_generator="telescope_snapshot",
+                        fill_model=True,
+                        writemodelcatalog=True,
+                        fetch_sources=False)
+            from pyrap.tables import table as tbl
+            with tbl(test_ms) as tt:
+                self.assertTrue("MODEL_DATA" in tt.colnames())
+        else:
+            pass
