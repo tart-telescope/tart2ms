@@ -6,10 +6,11 @@ data:
 	TARGET=rhodes bash download_tart_data.sh
 
 SPHERE=--healpix --fov 180deg --res 1deg
-VENV=/home/tim/.tartvenv/bin
+VENV=~/.tartvenv/bin
+
 TART_OBS=${DIR}
 %.ms: %.hdf
-	tart2ms --rephase obs-midpoint --single-field --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
+	${VENV}/tart2ms --rephase obs-midpoint --single-field --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
 
 
 
