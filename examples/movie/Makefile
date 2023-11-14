@@ -22,9 +22,9 @@ disko:
 %.png: %.svg
 	convert $< $@
 
-msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/vis_*.hdf))
-svgfiles := $(patsubst %.ms,%.svg,$(wildcard ${TART_OBS}/vis_*.ms))
-pngfiles := $(patsubst %.ms,%.png,$(wildcard ${TART_OBS}/vis_*.ms))
+msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/obs_*.hdf))
+svgfiles := $(patsubst %.hdf,%.svg,$(wildcard ${TART_OBS}/obs_*.hdf))
+pngfiles := $(patsubst %.hdf,%.png,$(wildcard ${TART_OBS}/obs_*.hdf))
 
 
 ms:	$(msfiles)
@@ -39,9 +39,9 @@ clean:
 	rm -f ${pngfiles}
 	
 mov: $(pngfiles)
-	ffmpeg -framerate 3  -pattern_type glob -i 'vis_*.png' \
+	ffmpeg -framerate 3  -i 'obs_%d.png' \
 		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
 
 wsmov: $(pngfiles)
-	ffmpeg -framerate 3 -i 'obs_hdf_%d.jpeg' \
+	ffmpeg -framerate 3 -i 'obs_%d.png' \
 		-c:v libvpx-vp9 -b:v 800k -pix_fmt yuv420p disko_scp_tart_obs.webm
