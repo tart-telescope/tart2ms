@@ -3,7 +3,7 @@ DIR=data_${TARGET}
 
 
 data:
-	TARGET=rhodes bash download_tart_data.sh
+	TARGET=${TARGET} bash download_tart_data.sh
 
 SPHERE=--healpix --fov 180deg --res 1deg
 VENV=~/.tartvenv/bin
@@ -15,15 +15,15 @@ TART_OBS=${DIR}
 
 
 %.svg: %.h5
-	${VENV}/disko_draw --SVG $@  $<
+	${VENV}/disko_draw --show-sources --SVG $@  $<
+
+#%.h5: %.ms
+#	${VENV}/disko --ms $< ${SPHERE} --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@ 
+
 
 %.h5: %.ms
-	${VENV}/disko --ms $< ${SPHERE} --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@ 
-
-
-# %.h5: %.ms
-# 	${VENV}/spotless --ms $< ${SPHERE} --multimodel --HDF $@
-# 
+	${VENV}/spotless --ms $< ${SPHERE} --multimodel --HDF $@
+ 
 %.png: %.svg
 	convert $< $@
 
@@ -34,7 +34,9 @@ h5files := $(patsubst %.hdf,%.h5,$(wildcard ${TART_OBS}/obs_*.hdf))
 
 
 ms:	$(msfiles)
-	echo "Dne"
+	echo "Done"
+h5:	$(h5files)
+	echo "Done"
 svg:	$(svgfiles)
 	echo "Done"
 png:	$(pngfiles)
@@ -53,4 +55,4 @@ FFMPEG_OPT=-framerate 3 -i '${TART_OBS}/obs_%d.png' -vf scale=420:-1 -c:v libvpx
 
 webm: $(pngfiles)
 	ffmpeg ${FFMPEG_OPT} -pass 1 -an -f null /dev/null
-	ffmpeg ${FFMPEG_OPT} -pass 2 -c:a libopus output.webm
+	ffmpeg ${FFMPEG_OPT} -pass 2 -c:a libopus output_${TARGET}.webm
