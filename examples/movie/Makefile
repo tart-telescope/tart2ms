@@ -5,30 +5,31 @@ DIR=data_${TARGET}
 data:
 	TARGET=rhodes bash download_tart_data.sh
 
+SPHERE=--healpix --fov 180deg --res 1deg
+VENV=/home/tim/.tartvenv/bin
 TART_OBS=${DIR}
 %.ms: %.hdf
 	tart2ms --rephase obs-midpoint --single-field --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
 
-disko:
-	disko --file obs_1.json --healpix --fov 180deg --res 1deg --lasso --alpha 0.0025 --l1-ratio 0.02 --show-sources --SVG
 
-
-%.h5: %.ms
-	disko --ms $< --healpix --fov 180deg --res 1deg --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@ 
 
 %.svg: %.h5
-	disko_draw --SVG $@  $<
+	${VENV}/disko_draw --SVG $@  $<
 
-# %.svg: %.ms
-# 	spotless --ms $< --healpix --fov 180deg --multimodel --res 1deg --SVG
-# 	mv spotless_2022*.svg $@
+%.h5: %.ms
+	${VENV}/disko --ms $< ${SPHERE} --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@ 
 
+
+# %.h5: %.ms
+# 	${VENV}/spotless --ms $< ${SPHERE} --multimodel --HDF $@
+# 
 %.png: %.svg
 	convert $< $@
 
 msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/obs_*.hdf))
 svgfiles := $(patsubst %.hdf,%.svg,$(wildcard ${TART_OBS}/obs_*.hdf))
 pngfiles := $(patsubst %.hdf,%.png,$(wildcard ${TART_OBS}/obs_*.hdf))
+h5files := $(patsubst %.hdf,%.h5,$(wildcard ${TART_OBS}/obs_*.hdf))
 
 
 ms:	$(msfiles)
@@ -41,6 +42,7 @@ png:	$(pngfiles)
 clean:
 	rm -f ${svgfiles}
 	rm -f ${pngfiles}
+	rm -f ${h5files}
 	
 mov: $(pngfiles)
 	ffmpeg -framerate 3  -i 'obs_%d.png' \

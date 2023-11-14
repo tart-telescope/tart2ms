@@ -26,7 +26,7 @@ try:
     from africanus.rime.dask import wsclean_predict
     from africanus.coordinates.dask import radec_to_lm
 except ImportError:
-    logger.warning("Cannot import Africanus API. MODEL_DATA filling capabilities disabled")
+    #logger.warning("Cannot import Africanus API. MODEL_DATA filling capabilities disabled")
     AFRICANUS_DFT_AVAIL = False
 
 def azel2radec(az, el, location, obstime, distance=None):
