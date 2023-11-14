@@ -1,7 +1,6 @@
 data:
-	bash download_tart_data.sh
+	TARGET=rhodes bash download_tart_data.sh
 
-TARGET=rhodes
 TART_OBS=.
 %.ms: %.hdf
 	tart2ms --rephase obs-midpoint --single-field --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
@@ -35,6 +34,10 @@ svg:	$(svgfiles)
 png:	$(pngfiles)
 	echo "Done"
 
+clean:
+	rm -f ${svgfiles}
+	rm -f ${pngfiles}
+	
 mov: $(pngfiles)
 	ffmpeg -framerate 3  -pattern_type glob -i 'vis_*.png' \
 		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
