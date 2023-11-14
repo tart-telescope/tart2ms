@@ -1,7 +1,11 @@
+TARGET=rhodes
+DIR=data_${TARGET}
+
+
 data:
 	TARGET=rhodes bash download_tart_data.sh
 
-TART_OBS=.
+TART_OBS=${DIR}
 %.ms: %.hdf
 	tart2ms --rephase obs-midpoint --single-field --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
 
@@ -42,6 +46,8 @@ mov: $(pngfiles)
 	ffmpeg -framerate 3  -i 'obs_%d.png' \
 		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
 
-wsmov: $(pngfiles)
-	ffmpeg -framerate 3 -i 'obs_%d.png' \
-		-c:v libvpx-vp9 -b:v 800k -pix_fmt yuv420p disko_scp_tart_obs.webm
+FFMPEG_OPT="-framerate 3 -i 'obs_%d.png' -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p"
+
+webm: $(pngfiles)
+	ffmpeg ${FFMPEG_OPT} -pass 1 -an -f null /dev/null && \
+	ffmpeg ${FFMPEG_OPT} -pass 2 -c:a libopus output.webm
