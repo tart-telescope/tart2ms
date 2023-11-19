@@ -5,7 +5,9 @@ all:
 	make ms TARGET=${TARGET}
 	make h5 TARGET=${TARGET}
 	make svg TARGET=${TARGET}
-	make movie TARGET=${TARGET}
+	make png TARGET=${TARGET}
+	make webm TARGET=${TARGET}
+
 data:
 	TARGET=${TARGET} bash download_tart_data.sh
 
@@ -13,9 +15,9 @@ SPHERE=--healpix --fov 180deg --res 1deg
 VENV=~/.tartvenv/bin
 
 TART_OBS=${DIR}
+
 %.ms: %.hdf
 	${VENV}/tart2ms --rephase obs-midpoint --single-field --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
-
 
 
 %.svg: %.h5
@@ -29,7 +31,8 @@ TART_OBS=${DIR}
 	${VENV}/spotless --ms $< ${SPHERE} --multimodel --HDF $@
  
 %.png: %.svg
-	convert $< $@
+#	convert $< $@
+	inkscape --export-width=840 --export-area-drawing --export-filename=$@ --export-overwrite --export-type=png $<
 
 msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/obs_*.hdf))
 svgfiles := $(patsubst %.hdf,%.svg,$(wildcard ${TART_OBS}/obs_*.hdf))
@@ -55,7 +58,7 @@ mov: $(pngfiles)
 	cd ${TART_OBS} && ffmpeg -framerate 3  -i 'obs_%d.png' \
 		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
 
-FFMPEG_OPT=-framerate 3 -i '${TART_OBS}/obs_%d.png' -vf scale=420:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
+FFMPEG_OPT=-framerate 3 -i '${TART_OBS}/obs_%d.png' -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
 
 webm: $(pngfiles)
 	ffmpeg ${FFMPEG_OPT} -pass 1 -an -f null /dev/null
