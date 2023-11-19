@@ -1,7 +1,11 @@
 TARGET=rhodes
 DIR=data_${TARGET}
 
-
+all:
+	make ms TARGET=${TARGET}
+	make h5 TARGET=${TARGET}
+	make svg TARGET=${TARGET}
+	make movie TARGET=${TARGET}
 data:
 	TARGET=${TARGET} bash download_tart_data.sh
 

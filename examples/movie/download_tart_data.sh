@@ -3,13 +3,13 @@
 # Needs v1.1.2b1 to fix a bug when checksumming partially downloaded local files.
 TART_API=https://tart.elec.ac.nz/${TARGET}/
 DIR=data_${TARGET}
+rm -rf ${DIR}
 mkdir -p ${DIR}
+VENV=~/.tartvenv/bin
 cd ${DIR}
-for i in {1..30}
+for i in {1..60}
 do
-  tart_download_data --api ${TART_API} --n 1 --vis
-  sleep 1
-  mv `find . -name 'vis_*.hdf'` obs_$i.hdf
-  tart_calibration_data --n 1 --file obs_$i.json
-  sleep 120
+  ${VENV}/tart_download_data --api ${TART_API} --n 1 --vis --file obs_$i.hdf
+  ${VENV}/tart_calibration_data --n 1 --file obs_$i.json
+  sleep 60
 done
