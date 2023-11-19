@@ -42,7 +42,7 @@ test2:
 
 include Makefile.venv
 
-$(VENV):
-	$(PY) -m venv --system-site-packages $(VENVDIR)
-#       $(PY) -m venv $(VENVDIR)
-	$(VENV)/python3 -m pip install --upgrade pip setuptools wheel
+# $(VENV):
+# 	$(PY) -m venv --system-site-packages $(VENVDIR)
+# 	$(PY) -m ensurepip --upgrade
+# 	$(VENV)/python3 -m pip install --upgrade pip setuptools wheel
