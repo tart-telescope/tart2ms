@@ -36,12 +36,6 @@
         }
     },
     {
-        "name": "Mars",
-        "position": {
-            "FRAME": "Special Body"
-        }
-    },
-    {
         "name": "Sun",
         "position": {
             "FRAME": "Special Body"
