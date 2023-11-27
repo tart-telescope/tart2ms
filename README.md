@@ -93,6 +93,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 ## Changelog
 
 - 0.5.0b3 Remove noisy warnings. Add venv makefile.
+          Output the snapshot direction in 12-ball format to make rephasing easier.
 - 0.5.0b2 Make prediction an optional dependency to remove codex-africanus from requirements.
 - 0.5.0b1 Add model prediction
           Add automatic catalog download
