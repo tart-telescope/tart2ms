@@ -376,7 +376,7 @@ def ms_create(ms_table_name, info,
 
     directions = direction.T
     for d in directions:
-        LOGGER.info(f"    shapshot direction {d[0]}, {d[1]} {SkyCoord(d[0]*u.rad, d[1]*u.rad, frame='icrs').to_string('dms')}")
+        LOGGER.info(f"    shapshot direction {d[0]}, {d[1]} {__twelveball(d.flatten())}")
 
     use_special_fn = None
     if phase_center_policy == "instantaneous-zenith":
