@@ -8,6 +8,11 @@ all:
 	make png TARGET=${TARGET}
 	make webm TARGET=${TARGET}
 
+# Get the last hours worth of data from the s3 bucket
+s3:
+	rm -rf ${DIR}
+	${VENV}/python3 get_s3_data.py --dir ${DIR} --since 72 --n 60
+
 data:
 	TARGET=${TARGET} bash download_tart_data.sh
 
@@ -23,12 +28,12 @@ TART_OBS=${DIR}
 %.svg: %.h5
 	${VENV}/disko_draw --show-sources --SVG $@  $<
 
-#%.h5: %.ms
-#	${VENV}/disko --ms $< ${SPHERE} --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@ 
-
-
 %.h5: %.ms
-	${VENV}/spotless --ms $< ${SPHERE} --multimodel --HDF $@
+	${VENV}/disko --ms $< ${SPHERE} --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@ 
+
+
+#%.h5: %.ms
+#	${VENV}/spotless --ms $< ${SPHERE} --multimodel --HDF $@
  
 %.png: %.svg
 #	convert $< $@
