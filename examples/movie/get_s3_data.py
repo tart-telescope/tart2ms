@@ -17,6 +17,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--dir', required=False, default=".", help="Output directory")
 
+    parser.add_argument('--name', required=False, default=None, help="Output file name prefix - eg 'out_' would produce files 'out_1.hdf', out_2.hdf ...")
+
     parser.add_argument('--target', required=False,
                         default='signal', help="Telescope name in s3 bucket.")
 
@@ -72,7 +74,7 @@ if __name__ == "__main__":
         if o.last_modified > an_hour_ago:
             desired_objects.append(o)
 
-    steps = len(desired_objects) // N
+    steps = min(len(desired_objects) // N, 1)
 
     index = 1
     for item in tqdm(list(desired_objects)[::steps]):

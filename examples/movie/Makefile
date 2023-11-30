@@ -26,10 +26,10 @@ TART_OBS=${DIR}
 
 
 %.svg: %.h5
-	${VENV}/disko_draw --show-sources --SVG $@  $<
+	${VENV}/disko_draw --max 16.0 --show-sources --SVG $@  $<
 
 %.h5: %.ms
-	${VENV}/disko --ms $< ${SPHERE} --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@ 
+	${VENV}/disko --ms $< ${SPHERE} --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@
 
 
 #%.h5: %.ms
@@ -37,7 +37,7 @@ TART_OBS=${DIR}
  
 %.png: %.svg
 #	convert $< $@
-	inkscape --export-width=840 --export-area-drawing --export-filename=$@ --export-overwrite --export-type=png $<
+	inkscape --export-width=2000 --export-area-drawing --export-filename=$@ --export-overwrite --export-type=png $<
 
 msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/obs_*.hdf))
 svgfiles := $(patsubst %.hdf,%.svg,$(wildcard ${TART_OBS}/obs_*.hdf))
@@ -63,7 +63,7 @@ mov: $(pngfiles)
 	cd ${TART_OBS} && ffmpeg -framerate 3  -i 'obs_%d.png' \
 		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
 
-FFMPEG_OPT=-framerate 3 -i '${TART_OBS}/obs_%d.png' -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
+FFMPEG_OPT=-framerate 3 -i '${TART_OBS}/obs_%d.svg' --frame_size 100000 -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
 
 webm: $(pngfiles)
 	ffmpeg ${FFMPEG_OPT} -pass 1 -an -f null /dev/null
