@@ -229,10 +229,10 @@ $(VENV):
 $(VENV)/$(MARKER): $(VENVDEPENDS) | $(VENV)
 ifneq ($(strip $(REQUIREMENTS_TXT)),)
 	$(VENV)/python3 -m ensurepip --upgrade
-	$(VENV)/pip3 install $(foreach path,$(REQUIREMENTS_TXT),-r $(path))
+	$(VENV)/pip3 install -U $(foreach path,$(REQUIREMENTS_TXT),-r $(path))
 endif
 ifneq ($(strip $(VENV_LOCAL_PACKAGE)),)
-	$(VENV)/pip3 install $(foreach path,$(sort $(VENV_LOCAL_PACKAGE)),-e $(dir $(path)))
+	$(VENV)/pip3 install -U $(foreach path,$(sort $(VENV_LOCAL_PACKAGE)),-e $(dir $(path)))
 endif
 	$(call touch,$(VENV)/$(MARKER))
 
