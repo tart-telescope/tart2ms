@@ -9,9 +9,14 @@ all:
 	make webm TARGET=${TARGET}
 
 # Get the last hours worth of data from the s3 bucket
-s3:
+flyby:
 	rm -rf ${DIR}
-	${VENV}/python3 get_s3_data.py --dir ${DIR} --since 72 --n 60
+	${VENV}/python3 get_s3_data.py --dir ${DIR} --target ${TARGET} --start 2023-11-30T23:30:00 --duration 60 --n 60
+
+# Get the last hours worth of data from the s3 bucket
+hour:
+	rm -rf ${DIR}
+	${VENV}/tart_get_archive_data --dir ${DIR} --start -60 --duration 60  --n 60
 
 data:
 	TARGET=${TARGET} bash download_tart_data.sh
@@ -21,15 +26,19 @@ VENV=~/.tartvenv/bin
 
 TART_OBS=${DIR}
 
+# --rephase "J153145-454621"
 %.ms: %.hdf
-	${VENV}/tart2ms --rephase obs-midpoint --single-field --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
+	${VENV}/tart2ms  --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
 
 
 %.svg: %.h5
 	${VENV}/disko_draw --max 16.0 --show-sources --SVG $@  $<
 
 %.h5: %.ms
-	${VENV}/disko --ms $< ${SPHERE} --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $@
+	for number in `seq 0 59`; do \
+		${VENV}/disko --ms $< ${SPHERE} --field $$number --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $*_$$number.h5 ; \
+	done
+	touch $@
 
 
 #%.h5: %.ms
@@ -40,9 +49,9 @@ TART_OBS=${DIR}
 	inkscape --export-width=2000 --export-area-drawing --export-filename=$@ --export-overwrite --export-type=png $<
 
 msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/obs_*.hdf))
-svgfiles := $(patsubst %.hdf,%.svg,$(wildcard ${TART_OBS}/obs_*.hdf))
-pngfiles := $(patsubst %.hdf,%.png,$(wildcard ${TART_OBS}/obs_*.hdf))
-h5files := $(patsubst %.hdf,%.h5,$(wildcard ${TART_OBS}/obs_*.hdf))
+h5files  := $(patsubst %.ms,%.h5,$(wildcard ${TART_OBS}/obs_*.ms))
+svgfiles := $(patsubst %.h5,%.svg,$(wildcard ${TART_OBS}/obs_*_*.h5))
+pngfiles := $(patsubst %.svg,%.png,$(wildcard ${TART_OBS}/obs_*.svg))
 
 
 ms:	$(msfiles)
