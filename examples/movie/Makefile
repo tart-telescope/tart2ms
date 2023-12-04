@@ -72,8 +72,8 @@ mov: $(pngfiles)
 	cd ${TART_OBS} && ffmpeg -framerate 3  -i 'obs_%d.png' \
 		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
 
-FFMPEG_OPT=-framerate 3 -i '${TART_OBS}/obs_%d.svg' --frame_size 100000 -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
+FFMPEG_OPT=-framerate 3 -i ${TART_OBS}/obs_%07d.png -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
 
-webm: $(pngfiles)
+webm: 
 	ffmpeg ${FFMPEG_OPT} -pass 1 -an -f null /dev/null
 	ffmpeg ${FFMPEG_OPT} -pass 2 -c:a libopus output_${TARGET}.webm
