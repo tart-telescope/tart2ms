@@ -46,7 +46,7 @@ TART_OBS=${DIR}
  
 %.png: %.svg
 #	convert $< $@
-	inkscape --export-width=2000 --export-area-drawing --export-filename=$@ --export-overwrite --export-type=png $<
+	inkscape --export-width=1000 --export-area-drawing --export-filename=$@ --export-overwrite --export-type=png $<
 
 msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/obs_?????.hdf))
 h5files  := $(patsubst %.ms,%.h5,$(wildcard ${TART_OBS}/obs_?????.ms))
@@ -72,7 +72,7 @@ mov: $(pngfiles)
 	cd ${TART_OBS} && ffmpeg -framerate 3  -i 'obs_%d.png' \
 		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
 
-FFMPEG_OPT=-framerate 3 -i ${TART_OBS}/obs_%07d.png -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
+FFMPEG_OPT=-framerate 25 -pattern_type glob -i '${TART_OBS}/obs_*.png' -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
 
 webm: 
 	ffmpeg ${FFMPEG_OPT} -pass 1 -an -f null /dev/null
