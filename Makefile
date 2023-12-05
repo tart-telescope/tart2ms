@@ -7,13 +7,11 @@ WSCLEAN=export OPENBLAS_NUM_THREADS=1; wsclean -weight briggs 0 -name test -pol 
 MS=test.ms
 
 
-VENVDIR=~/.tartvenv
+develop:
+	pip3 install -e .
 
-develop: venv
-	${VENV}/pip3 install -e .
-
-test: venv
-	${VENV}/python3 -m pytest
+test:
+	python3 -m pytest
 
 	
 lint:
@@ -25,24 +23,17 @@ clean:	${MS}
 HDF='./test_data/vis_2021-03-25_20_50_23.568474.hdf'
 h5:
 	rm -rf ${MS}
-	${VENV}/tart2ms --hdf ${HDF} --ms ${MS}  --rephase "obs-midpoint" --single-field
+	tart2ms --hdf ${HDF} --ms ${MS}  --rephase "obs-midpoint" --single-field
 # 	wsclean -name test -pol RR -size 1280 1280 -scale 0.0275 -niter 0 ${MS}
 
 JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
 testms:
 	rm -rf ${MS}
-	${VENV}/tart2ms --json ${JSON} --ms ${MS} 
+	tart2ms --json ${JSON} --ms ${MS} 
 
 disko:
-	${VENV}/disko --ms ${MS} --healpix --fov 170deg --res 1deg --SVG --lasso --alpha 0.01
+	disko --ms ${MS} --healpix --fov 170deg --res 1deg --SVG --lasso --alpha 0.01
 
 test2:
 	rm -rf ${MS}
-	${VENV}/tart2ms --json ${JSON} --ms ${MS} --pol2
-
-include Makefile.venv
-
-# $(VENV):
-# 	$(PY) -m venv --system-site-packages $(VENVDIR)
-# 	$(PY) -m ensurepip --upgrade
-# 	$(VENV)/python3 -m pip install --upgrade pip setuptools wheel
+	tart2ms --json ${JSON} --ms ${MS} --pol2
