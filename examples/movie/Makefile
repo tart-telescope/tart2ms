@@ -1,5 +1,6 @@
 TARGET=signal
 DIR=flyby_${TARGET}
+MS=${DIR}.ms
 
 all:
 	make ms TARGET=${TARGET}
@@ -11,14 +12,15 @@ all:
 # Get the last hours worth of data from the s3 bucket
 flyby:
 	rm -rf ${DIR}
-	tart_get_archive_data --dir ${DIR} --target ${TARGET} --start 2023-12-01T00:25:00 --duration 10
+	tart_get_archive_data --dir ${DIR} --target ${TARGET} --start 2023-12-01T00:25:00 --duration 11
 
 single_ms:
-	tart2ms  --hdf ${obsfiles} --clobber --ms flyby.ms  --telescope_name "TART - signal"
+	tart2ms  --hdf ${obsfiles} --clobber --ms ${MS}  --telescope_name "TART - signal"
 
+NUMBER_OF_FIELDS=780
 images:
-	for number in `seq -w 0 540`; do \
-		disko --ms flyby.ms ${SPHERE} --field $$number --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF ${DIR}/image_$$number.h5 ; \
+	for number in `seq -w 0 ${NUMBER_OF_FIELDS}`; do \
+		disko --ms ${MS} ${SPHERE} --field $$number --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF ${DIR}/image_$$number.h5 ; \
 	done
 
 # 2023-11-30T23:30:00
@@ -43,11 +45,11 @@ TART_OBS=${DIR}
 
 
 %.svg: %.h5
-	disko_draw --max 16.0 --show-sources --SVG $@  $<
+	disko_draw --show-sources --SVG $@  $<
 
 %.h5: %.ms
 	for number in `seq -w 0 59`; do \
-		disko --ms $< ${SPHERE} --field $$number --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $*$$number.h5 ; \
+		disko --ms $< ${SPHERE} --field $$number --lasso --alpha 0.0015 --l1-ratio 0.02 --HDF $*$$number.h5 ; \
 	done
 	touch $@
 
@@ -60,16 +62,11 @@ TART_OBS=${DIR}
 	inkscape --export-width=1000 --export-area-drawing --export-filename=$@ --export-overwrite --export-type=png $<
 
 obsfiles := $(wildcard ${TART_OBS}/obs_?????.hdf)
-msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/obs_?????.hdf))
-h5files  := $(patsubst %.ms,%.h5,$(wildcard ${TART_OBS}/obs_?????.ms))
-svgfiles := $(patsubst %.h5,%.svg,$(wildcard ${TART_OBS}/image_*.h5))
-pngfiles := $(patsubst %.svg,%.png,$(wildcard ${TART_OBS}/obs_*.svg))
+h5files  := $(wildcard ${TART_OBS}/image_*.h5)
+svgfiles := $(patsubst %.h5,%.svg,$(h5files))
+pngfiles := $(patsubst %.svg,%.png,$(svgfiles))
 
 
-ms:	$(msfiles)
-	echo "Done"
-h5:	$(h5files)
-	echo "Done"
 svg:	$(svgfiles)
 	echo "Done"
 png:	$(pngfiles)
@@ -84,7 +81,7 @@ mov: $(pngfiles)
 	cd ${TART_OBS} && ffmpeg -framerate 3  -i 'obs_%d.png' \
 		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
 
-FFMPEG_OPT=-framerate 25 -pattern_type glob -i '${TART_OBS}/obs_*.png' -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
+FFMPEG_OPT=-framerate 25 -pattern_type glob -i '${TART_OBS}/image_*.png' -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
 
 webm: 
 	ffmpeg ${FFMPEG_OPT} -pass 1 -an -f null /dev/null
