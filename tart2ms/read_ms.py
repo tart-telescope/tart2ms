@@ -30,9 +30,10 @@ class RadioObservation(object):
     def __init__(self):
         pass
 
+def dt(_t0):
+    return f"  \t\t\tElapsed {time.perf_counter() - _t0 :04f} s"
 
-def read_ms(ms, num_vis, angular_resolution, chunks=1000, channel=0,
-            field_id=0, ddid=0):
+def read_ms(ms, num_vis, angular_resolution, channel=0, field_id=0, ddid=0, snapshot=0, pol=0):
     """
     Use dask-ms to load the necessary data to create a telescope operator
     (will use uvw positions, and antenna positions)
@@ -47,22 +48,24 @@ def read_ms(ms, num_vis, angular_resolution, chunks=1000, channel=0,
     # client = distributed.Client()
     if not os.path.exists(ms):
         raise RuntimeError(f"Measurement set {ms} not found")
-
+    chunks=10000
     try:
-        # Create a dataset representing the entire antenna table
-        ant_table = "::".join((ms, "ANTENNA"))
+        _tic = time.perf_counter()
+        logger.info(f"Reading {ms}...")
 
-        for ant_ds in xds_from_table(ant_table):
-            # print(ant_ds)
-            # print(dask.compute(ant_ds.NAME.data,
-            # ant_ds.POSITION.data,
-            # ant_ds.DISH_DIAMETER.data))
-            ant_p = np.array(ant_ds.POSITION.data)
-        logger.info("Antenna Positions {}".format(ant_p.shape))
+        # Create a dataset representing the entire antenna table
+        ant_ds, tabkw, colkw = xds_from_table(f"{ms}::ANTENNA",
+                                              table_keywords=True,
+                                              column_keywords=True)
+        logger.info(f"Table Keywords: {tabkw}")
+        logger.info(f"Column Keywords: {colkw}")
+
+        ant_p = np.array(ant_ds[0].POSITION.data)
+        # dt = 7.116458
+        logger.info(f"Antenna Positions {ant_p.shape},  {dt(_tic)}")
 
         # Create a dataset representing the field
-        field_table = "::".join((ms, "FIELD"))
-        for field_ds in xds_from_table(field_table):
+        for field_ds in xds_from_table(f"{ms}::FIELD"):
             if field_id >= field_ds.sizes['row'] or field_id < 0:
                 raise RuntimeError(f"Selected field {field_id} is not a valid field identifier. "
                                    f"Must be in [0, {field_ds.sizes['row']-1}]")
@@ -75,6 +78,7 @@ def read_ms(ms, num_vis, angular_resolution, chunks=1000, channel=0,
         # Create datasets representing each row of the spw table
         # we need a map to select SPW based on DDID first
         # MAIN.DDID (FK) -> DATA_DESCRIPTOR.SPECTRAL_WINDOW_ID (FK) -> SPECTRAL_WINDOW.CHAN_FREQ
+        logger.info(f"Getting Data Desciptions..,  {dt(_tic)}")
         ddid_table = "::".join((ms, "DATA_DESCRIPTION"))
         for ddid_ds in xds_from_table(ddid_table, group_cols="__row__"):
             spw_ids = ddid_ds.SPECTRAL_WINDOW_ID.data.compute()
@@ -87,9 +91,10 @@ def read_ms(ms, num_vis, angular_resolution, chunks=1000, channel=0,
             # although I suspect GNSS receivers are all just circular
             pol_ids = ddid_ds.POLARIZATION_ID.data.compute()
 
+        logger.info(f"Getting Spectral Window..,  {dt(_tic)}")
         spw_table = "::".join((ms, "SPECTRAL_WINDOW"))
         for spw_ds in xds_from_table(spw_table, group_cols="__row__"):
-            logger.debug("CHAN_FREQ.shape: {}".format(spw_ds.CHAN_FREQ.values.shape))
+            logger.info("CHAN_FREQ.shape: {}".format(spw_ds.CHAN_FREQ.values.shape))
             frequencies = dask.compute(spw_ds.CHAN_FREQ.values)[int(spw_ids[ddid])].flatten()
             frequency = frequencies[channel]
             logger.info("Selected SPW {} Frequencies = {} MHz".format(spw_ids[ddid],
@@ -99,21 +104,29 @@ def read_ms(ms, num_vis, angular_resolution, chunks=1000, channel=0,
             logger.debug("NUM_CHAN = %f" % np.array(spw_ds.NUM_CHAN.values)[0])
 
         # Create datasets from a partioning of the MS
+        logger.info(f"Getting datasets..,  {dt(_tic)}")
         group_cols = ["FIELD_ID", "DATA_DESC_ID"]
         datasets = list(xds_from_ms(ms, chunks={"row": chunks}, group_cols=group_cols))
         logger.debug("DataSets: N={}".format(len(datasets)))
 
         pol = 0
 
+        #
+        # Helper to read numpy arrays. This is VERY SLOW taking
+        # around 10 seconds to perform on an array of ten minutes
+        # of TART visibilities. (50000 rows)
+        #
         def read_np_array(da, title, dtype=np.float32):
             tic = time.perf_counter()
             logger.info("Reading {}...".format(title))
             ret = np.array(da, dtype=dtype)
             toc = time.perf_counter()
-            logger.info(f"Shape {ret.shape} Elapsed {toc - tic :04f} seconds")
+            logger.info(f"Shape {ret.shape} time {toc - tic :04f} s")
             return ret
+
         no_datasets_read = 0
-        for i, ds in enumerate(datasets):
+        logger.info(f"Processing datasets..,  {dt(_tic)}")
+        for ds in datasets:
             logger.debug(
                 "DATASET field_id={} shape: {}".format(ds.FIELD_ID, ds.DATA.data.shape)
             )
@@ -122,6 +135,7 @@ def read_ms(ms, num_vis, angular_resolution, chunks=1000, channel=0,
             if int(field_id) == int(ds.FIELD_ID) and \
                int(ddid) == int(ds.DATA_DESC_ID):
                 no_datasets_read += 1
+                logger.info(f"Found DATASET field_id={ds.FIELD_ID} shape: {ds.DATA.data.shape}")
                 uvw = read_np_array(ds.UVW.data, "UVW")
                 flags = read_np_array(
                     ds.FLAG.data[:, channel, pol], "FLAGS", dtype=np.int32
@@ -187,6 +201,9 @@ def read_ms(ms, num_vis, angular_resolution, chunks=1000, channel=0,
                 )
 
                 epoch_seconds = np.mean(np.array(ds.TIME.data))
+                break   # TODO Check this TCAM. Stop once we have our field ID.
+
+        logger.info(f"Processing complete,  {dt(_tic)}")
         if no_datasets_read == 0:
             raise RuntimeError("FIELD_ID ({}) or DDID ({}) contains no data".format(field_id, ddid))
 

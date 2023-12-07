@@ -92,6 +92,8 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.6.0b1 New casa_read_ms function similar to read_ms, but uses casacore - blindingly fast.
+          made function signatures the same for both read_ms() and casa_read_ms().
 - 0.5.0b3 Remove noisy warnings. Add venv makefile.
           Output the snapshot direction in 12-ball format to make rephasing easier.
 - 0.5.0b2 Make prediction an optional dependency to remove codex-africanus from requirements.

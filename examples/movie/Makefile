@@ -1,5 +1,5 @@
-TARGET=rhodes
-DIR=data_${TARGET}
+TARGET=signal
+DIR=flyby_${TARGET}
 
 all:
 	make ms TARGET=${TARGET}
@@ -11,46 +11,58 @@ all:
 # Get the last hours worth of data from the s3 bucket
 flyby:
 	rm -rf ${DIR}
-	${VENV}/tart_get_archive_data --dir ${DIR} --target ${TARGET} --start 2023-11-30T23:30:00 --duration 60
+	tart_get_archive_data --dir ${DIR} --target ${TARGET} --start 2023-12-01T00:25:00 --duration 10
+
+single_ms:
+	tart2ms  --hdf ${obsfiles} --clobber --ms flyby.ms  --telescope_name "TART - signal"
+
+images:
+	for number in `seq -w 0 540`; do \
+		disko --ms flyby.ms ${SPHERE} --field $$number --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF ${DIR}/image_$$number.h5 ; \
+	done
+
+# 2023-11-30T23:30:00
+
 
 # Get the last hours worth of data from the s3 bucket
 hour:
 	rm -rf ${DIR}
-	${VENV}/tart_get_archive_data --dir ${DIR} --start -60 --duration 60  --n 60
+	tart_get_archive_data --dir ${DIR} --start -60 --duration 60  --n 60
 
 data:
 	TARGET=${TARGET} bash download_tart_data.sh
 
-SPHERE=--healpix --fov 180deg --res 1deg
-VENV=~/.tartvenv/bin
+SPHERE=--healpix --fov 170deg --res 1deg
+
 
 TART_OBS=${DIR}
 
 # --rephase "J153145-454621"
 %.ms: %.hdf
-	${VENV}/tart2ms  --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
+	tart2ms  --hdf $< --clobber --ms $@  --telescope_name "KAT-7"
 
 
 %.svg: %.h5
-	${VENV}/disko_draw --max 16.0 --show-sources --SVG $@  $<
+	disko_draw --max 16.0 --show-sources --SVG $@  $<
 
 %.h5: %.ms
 	for number in `seq -w 0 59`; do \
-		${VENV}/disko --ms $< ${SPHERE} --field $$number --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $*$$number.h5 ; \
+		disko --ms $< ${SPHERE} --field $$number --lasso --alpha 0.0025 --l1-ratio 0.02 --HDF $*$$number.h5 ; \
 	done
 	touch $@
 
 
 #%.h5: %.ms
-#	${VENV}/spotless --ms $< ${SPHERE} --multimodel --HDF $@
+#	spotless --ms $< ${SPHERE} --multimodel --HDF $@
  
 %.png: %.svg
 #	convert $< $@
 	inkscape --export-width=1000 --export-area-drawing --export-filename=$@ --export-overwrite --export-type=png $<
 
+obsfiles := $(wildcard ${TART_OBS}/obs_?????.hdf)
 msfiles  := $(patsubst %.hdf,%.ms,$(wildcard ${TART_OBS}/obs_?????.hdf))
 h5files  := $(patsubst %.ms,%.h5,$(wildcard ${TART_OBS}/obs_?????.ms))
-svgfiles := $(patsubst %.h5,%.svg,$(wildcard ${TART_OBS}/obs_???????.h5))
+svgfiles := $(patsubst %.h5,%.svg,$(wildcard ${TART_OBS}/image_*.h5))
 pngfiles := $(patsubst %.svg,%.png,$(wildcard ${TART_OBS}/obs_*.svg))
 
 
