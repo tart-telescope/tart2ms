@@ -18,8 +18,7 @@ from astropy.constants import c
 from tart2ms.catalogs.catalog_reader import catalog_factory
 from tart2ms.fixvis import progress
 
-logger = logging.getLogger("tart2ms")
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 AFRICANUS_DFT_AVAIL = True
 try:

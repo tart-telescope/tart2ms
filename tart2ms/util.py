@@ -14,10 +14,20 @@ import json
 import re
 from astropy import constants
 from astropy.coordinates import SkyCoord
-from astropy import units as u
+# from astropy import units as u
 
-LOGGER = logging.getLogger("tart2ms")
-LOGGER.setLevel(logging.INFO)
+LOGGER = logging.getLogger(__name__)
+
+
+def get_wavelength(frequency):
+    return constants.c.value / frequency
+
+
+def get_wavelengths(distance, frequency):
+    '''
+        Used to convert from meters to uvw coordinates
+    '''
+    return distance * frequency / constants.c.value
 
 
 def rayleigh_criterion(max_freq, baseline_lengths):
@@ -32,9 +42,9 @@ def rayleigh_criterion(max_freq, baseline_lengths):
     max_baseline = np.max(baseline_lengths)
     min_baseline = np.min(baseline_lengths)
 
-    LOGGER.info("Baseline lengths:")
-    LOGGER.info(f"\tMinimum: {min_baseline:.4f} m")
-    LOGGER.info(
+    LOGGER.debug("Baseline lengths:")
+    LOGGER.debug(f"\tMinimum: {min_baseline:.4f} m")
+    LOGGER.debug(
         f"\tMaximum: {max_baseline:.4f} m --- {max_baseline/min_wl:.4f} wavelengths")
     return np.degrees(1.220 * min_wl / max_baseline)
 
@@ -52,7 +62,8 @@ def resolution_min_baseline(max_freq, resolution_deg):
 
     return 1.220 * min_wl / res_rad
 
-def read_known_phasings(fn=os.path.join(os.path.split(os.path.abspath(__file__))[0], 
+
+def read_known_phasings(fn=os.path.join(os.path.split(os.path.abspath(__file__))[0],
                                         "named_phasings.json")):
     def __try_construct_skycoord(x):
         try:
@@ -61,7 +72,7 @@ def read_known_phasings(fn=os.path.join(os.path.split(os.path.abspath(__file__))
             return False
         return True
 
-    with open(fn, 'r') as f: 
+    with open(fn, 'r') as f:
         vals = json.load(f)
     if not isinstance(vals, list):
         raise RuntimeError("named_phasings.json should contain only a list of dictionaries")
@@ -71,15 +82,16 @@ def read_known_phasings(fn=os.path.join(os.path.split(os.path.abspath(__file__))
         if not all(map(lambda x: req_key in x.keys(), vals)):
             raise RuntimeError(f"named_phasings should contain attribute '{req_key}'")
     if not all(map(lambda x: "FRAME" in x['position'], vals)):
-        raise RuntimeError(f"named_phasings should contain attribute 'FRAME'")
+        raise RuntimeError("named_phasings should contain attribute 'FRAME'")
     for req_key in ["RA", "DEC", "EQUINOX"]:
-        if not all(map(lambda x: req_key in x['position'], 
+        if not all(map(lambda x: req_key in x['position'],
                    filter(lambda x: x['position']["FRAME"] != "Special Body", vals))):
             raise RuntimeError(f"Non special body named_phasings position should contain attribute {req_key}")
     if not all(map(lambda x: __try_construct_skycoord(x['position']),
                    filter(lambda x: x['position']["FRAME"] != "Special Body", vals))):
-        raise RuntimeError(f"One or more positions in the named_phasings.json is not convertable to astropy SkyCoord")
+        raise RuntimeError("One or more positions in the named_phasings.json is not convertable to astropy SkyCoord")
     return vals
+
 
 def read_coordinate_twelveball(coordstring):
     """
@@ -88,10 +100,10 @@ def read_coordinate_twelveball(coordstring):
         yields ICRS Astropy SkyCoord if valid coord string is specified
         otherwise None
     """
-    m = re.match(r'^(?P<equinox>J|B)(?P<ra>[0-9]{6})(?P<sign>[+-]{1})(?P<dec>[0-9]{6})$', 
+    m = re.match(r'^(?P<equinox>J|B)(?P<ra>[0-9]{6})(?P<sign>[+-]{1})(?P<dec>[0-9]{6})$',
                  coordstring)
     if m is None:
-        return None # no match
+        return None  # no match
     rah = m['ra'][0:2]
     ram = m['ra'][2:4]
     ras = m['ra'][4:6]

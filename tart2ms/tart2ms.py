@@ -1,60 +1,20 @@
 '''
     Get TART data into a measurement set.
     Author: Tim Molteno, tim@elec.ac.nz
-    Copyright (c) 2019-2022.
+    Copyright (c) 2019-2024.
 
     Official Documentation is Here.
         https://casa.nrao.edu/Memos/229.html#SECTION00044000000000000000
 
     License. GPLv3.
 '''
-from datetime import datetime as dt
-import logging
-import json
-import h5py
-import dask
-from dask.diagnostics import ProgressBar
-#dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
-dask.config.set(scheduler='processes')  # overwrite default with threaded scheduler
-#dask.config.set(scheduler='synchronous')  # overwrite default with threaded scheduler
-import dateutil
 
-import dask.array as da
-import numpy as np
-import time
-import os
-import re
-from hashlib import sha256
-
-from itertools import product
-
-from casacore.quanta import quantity
-
-from astropy import coordinates as ac
-
-from daskms import Dataset, xds_to_table, xds_from_ms
-
-import astropy.units as u
-from astropy.time import Time
-from astropy.coordinates import SkyCoord, EarthLocation, Angle
-from astropy.constants import R_earth, c as lightspeed
-
-
-from tart.operation import settings
-from tart.imaging.visibility import Visibility
-from tart.imaging import (calibration,
-                          elaz)
 from .catalogs import catalog_reader
-
-from tart_tools import (api_imaging,
-                        api_handler)
-
 from .fixvis import (fixms,
                      synthesize_uvw,
                      dense2sparse_uvw,
                      progress,
                      rephase)
-
 from .util import (rayleigh_criterion,
                    read_known_phasings)
 from .ms_helper import (azel2radec,
@@ -62,8 +22,44 @@ from .ms_helper import (azel2radec,
                         get_catalog_sources_azel,
                         get_solar_system_bodies)
 
-LOGGER = logging.getLogger("tart2ms")
-LOGGER.setLevel(logging.INFO)
+from hashlib import sha256
+from itertools import product
+from casacore.quanta import quantity
+from daskms import Dataset, xds_to_table, xds_from_ms
+
+from astropy import coordinates as ac
+from astropy.time import Time
+from astropy.coordinates import SkyCoord, EarthLocation, Angle
+from astropy.constants import R_earth
+
+from tart.operation import settings
+from tart.imaging.visibility import Visibility
+from tart.imaging import calibration
+
+from tart_tools import (api_imaging,
+                        api_handler)
+
+import logging
+import json
+import h5py
+import dask
+import dateutil
+import time
+import os
+import re
+
+import dask.array as da
+import numpy as np
+import astropy.units as u
+
+from datetime import datetime as dt
+from dask.diagnostics import ProgressBar
+# dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
+dask.config.set(scheduler='processes')  # overwrite default with threaded scheduler
+# dask.config.set(scheduler='synchronous')  # overwrite default with threaded scheduler
+
+
+LOGGER = logging.getLogger(__name__)
 
 '''
 The following from Oleg Smirnov.
@@ -137,6 +133,7 @@ class MSTable:
         Little Helper to simplify writing a table.
     '''
     __write_futures = []
+
     def __init__(self, ms_name, table_name):
         self.table_name = "::".join((ms_name, table_name))
         self.datasets = []
@@ -145,7 +142,7 @@ class MSTable:
         self.datasets.append(dataset)
 
     def write(self):
-        """ Creates a future to be computed 
+        """ Creates a future to be computed
             ensure to call dask.compute with get_futures
             to finalize graph construction
         """
@@ -382,13 +379,13 @@ def ms_create(ms_table_name, info,
     if phase_center_policy == "instantaneous-zenith":
         pass
     elif isinstance(phase_center_policy, SkyCoord):
-        direction = np.deg2rad(np.array([[phase_center_policy.icrs.ra.value, 
+        direction = np.deg2rad(np.array([[phase_center_policy.icrs.ra.value,
                                           phase_center_policy.icrs.dec.value]]).reshape(1, 2, 1))
     elif (phase_center_policy == "no-rephase-obs-midpoint") or \
          (phase_center_policy == "rephase-obs-midpoint"):
         direction = direction[:, :, direction.shape[2]//2].reshape(1, 2, 1)  # observation midpoint
     elif phase_center_policy.find("rephase-") == 0:
-        fn = phase_center_policy.replace("rephase-","")
+        fn = phase_center_policy.replace("rephase-", "")
         use_special_fn = fn
         # 3CRR currently only catalog with special names
         catalog_positions = catalog_reader.catalog_factory.from_3CRR(fluxlim15=0.0)
@@ -396,7 +393,7 @@ def ms_create(ms_table_name, info,
         fsrc = list(filter(lambda x: x.name == fn, catalog_positions))
         if len(fsrc) > 0:
             direction = np.array([[fsrc[0].rarad, fsrc[0].decrad]]).reshape(1, 2, 1)
-        else: # otherwise it is in the named positions list
+        else:  # otherwise it is in the named positions list
             fsrc = list(filter(lambda x: x['name'].upper() == fn, named_positions))
             if len(fsrc) == 0:
                 raise RuntimeError(f"Unknown named source {fn}")
@@ -459,12 +456,13 @@ def ms_create(ms_table_name, info,
             raise RuntimeError(
                 "If sources are specified then we expected epochs to be of same size as sources list")
         for database_i, (epoch_s_i, sources_i) in enumerate(zip(epoch_s_sources, sources)):
-            if sources_i is None: continue
+            if sources_i is None:
+                continue
             for src in sources_i:
                 name = src['name']
                 # Convert to J2000
                 direction_src = azel2radec(az=src['az'],
-                                           el=src['el'], 
+                                           el=src['el'],
                                            location=location,
                                            obstime=sources_obstime[database_i])
                 LOGGER.debug(
@@ -602,12 +600,12 @@ def ms_create(ms_table_name, info,
         np_data = np.zeros((row, chan, corr), dtype=np.complex128)
         for i in range(corr):
             np_data[:, :, i] = vis_array.reshape((row, chan))
-        
+
         data_chunks = tuple((chunks['row'], chan, corr))
         dask_data = da.from_array(np_data, chunks=data_chunks)
         flag_categories = da.from_array(0.05*np.ones((row, 1, chan, corr)), chunks=(chunks['row'], 1, chan, corr))
         flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
-        
+
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks['row'], dtype=np.int32)
         if np_data.shape[0] % len(epoch_s) != 0:
@@ -649,9 +647,8 @@ def ms_create(ms_table_name, info,
             field_no = np.zeros_like(scan)
         else:
             raise ValueError(f"phase_center_policy must be one of "
-                         f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint',"
-                         f"'rephase-<named position>' or Astropy.SkyCoord] got {phase_center_policy}")
-        
+                             f"['instantaneous-zenith','rephase-obs-midpoint','no-rephase-obs-midpoint',"
+                             f"'rephase-<named position>' or Astropy.SkyCoord] got {phase_center_policy}")
 
         # apply rephasor if needed
         mean_sidereal_day = 23 + 56 / 60. + 4.0905 / 3600.  # hrs
@@ -661,7 +658,7 @@ def ms_create(ms_table_name, info,
         # then warnings must be raised if we're snapping the field centre without phasing
         obs_length = np.max(epoch_s) - np.min(epoch_s)
         snapshot_length_cutoff = rayleigh_crit / sidereal_rate * 0.05
-        
+
         if np.array(timestamps).size > 1 and uvw_generator != 'casacore':
             LOGGER.warning(f"You should not use '{uvw_generator}' mode to generate UVW coordinates"
                            f"for multi-timestamp databases. Your UVW coordinates will be wrong")
@@ -675,8 +672,8 @@ def ms_create(ms_table_name, info,
         map_row_to_zendir = da.from_array(np.arange(len(epoch_s), dtype=int).repeat(nbl), chunks=chunks['row'])
         if uvw_generator == 'telescope_snapshot':
             if isinstance(phase_center_policy, SkyCoord) or \
-               phase_center_policy.find('rephase-') >= 0: # rephase or non-rephase single field database
-               raise RuntimeError("Telescope snapshot UVW mode may only be used for zenethal snapshotting mode")
+                phase_center_policy.find('rephase-') >= 0:  # rephase or non-rephase single field database
+                raise RuntimeError("Telescope snapshot UVW mode may only be used for zenethal snapshotting mode")
             bl_pos = np.array(ant_pos)[baselines]
             uu_a, vv_a, ww_a = -(bl_pos[:, 1] - bl_pos[:, 0]).T
             # Use the - sign to get the same orientation as our tart projections.
@@ -692,17 +689,17 @@ def ms_create(ms_table_name, info,
                     centroid_direction = zenith_directions[zenith_directions.shape[0]//2, :].reshape(
                         1, 2)
                 elif isinstance(phase_center_policy, SkyCoord):
-                    centroid_direction = np.deg2rad(np.array([[phase_center_policy.icrs.ra.value, 
+                    centroid_direction = np.deg2rad(np.array([[phase_center_policy.icrs.ra.value,
                                                                phase_center_policy.icrs.dec.value]]).reshape(1, 2))
                 elif phase_center_policy.find("rephase-") == 0:
-                    fn = phase_center_policy.replace("rephase-","")
+                    fn = phase_center_policy.replace("rephase-", "")
                     # 3CRR currently only catalog with special names
                     catalog_positions = catalog_reader.catalog_factory.from_3CRR(fluxlim15=0.0)
                     named_positions = read_known_phasings()
                     fsrc = list(filter(lambda x: x.name == fn, catalog_positions))
                     if len(fsrc) > 0:
                         centroid_direction = np.array([[fsrc[0].rarad, fsrc[0].decrad]]).reshape(1, 2)
-                    else: # otherwise it is in the named positions list
+                    else:  # otherwise it is in the named positions list
                         fsrc = list(filter(lambda x: x['name'].upper() == fn, named_positions))
                         if len(fsrc) == 0:
                             raise RuntimeError(f"Unknown named source {fn}")
@@ -724,7 +721,7 @@ def ms_create(ms_table_name, info,
                     centroid_direction = zenith_directions
                 else:
                     raise RuntimeError("Invalid rephase option")
-                
+
                 subfields = da.unique(map_row_to_zendir).compute()
                 assert zenith_directions.shape[0] == subfields.size
                 p = progress(
@@ -770,7 +767,7 @@ def ms_create(ms_table_name, info,
 
         if fill_model:
             LOGGER.info(f"Predicting GNSS positions for {len(epoch_s)} timestamps")
-            model_data = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+            model_data = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype,
                                        uvw_data,
                                        epoch_s, spw_chan_freqs, spw_i,
                                        zenith_directions,
@@ -783,22 +780,23 @@ def ms_create(ms_table_name, info,
             cat_sources = get_catalog_sources_azel(obstime, location)
             if write_extragalactic_catalogs:
                 LOGGER.info(f"Predicting celestial catalog positions for {len(epoch_s)} timestamps")
-                celestial_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
-                                            uvw_data,
-                                            epoch_s, spw_chan_freqs, spw_i,
-                                            zenith_directions,
-                                            map_row_to_zendir,
-                                            location,
-                                            cat_sources, epoch_s, obstime,
-                                            writemodelcatalog,
-                                            filter_elevation=20.0,
-                                            append_catalog=True)
+                celestial_model = predict_model(dask_data.shape, dask_data.chunks,
+                                                dask_data.dtype,
+                                                uvw_data,
+                                                epoch_s, spw_chan_freqs, spw_i,
+                                                zenith_directions,
+                                                map_row_to_zendir,
+                                                location,
+                                                cat_sources, epoch_s, obstime,
+                                                writemodelcatalog,
+                                                filter_elevation=20.0,
+                                                append_catalog=True)
                 if celestial_model is None:
                     celestial_model = da.zeros_like(dask_data)
                 model_data += celestial_model
             LOGGER.info(f"Predicting Sun and Moon positions for {len(epoch_s)} timestamps")
             cat_sources = get_solar_system_bodies(obstime, location)
-            solar_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype, 
+            solar_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype,
                                         uvw_data,
                                         epoch_s, spw_chan_freqs, spw_i,
                                         zenith_directions,
@@ -813,6 +811,7 @@ def ms_create(ms_table_name, info,
                 solar_model = da.zeros_like(dask_data)
             model_data += solar_model
             model_data.rechunk(dask_data.chunks)
+
         def __rephase_dask_wrapper(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
             vis = np.array(vis[0]) if isinstance(vis, list) else vis
             uvw = np.array(uvw[0]) if isinstance(uvw, list) else uvw
@@ -821,10 +820,11 @@ def ms_create(ms_table_name, info,
             return rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=phasesign)
 
         if isinstance(phase_center_policy, SkyCoord) or \
-           phase_center_policy.find('rephase-') == 0:
-            if centroid_direction.shape[0] == 1: 
-                new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad, centroid_direction[0, 1]*u.rad,
-                                        frame='icrs')
+            phase_center_policy.find('rephase-') == 0:
+            if centroid_direction.shape[0] == 1:
+                new_phase_dir = SkyCoord(centroid_direction[0, 0]*u.rad,
+                                         centroid_direction[0, 1]*u.rad,
+                                         frame='icrs')
                 new_phase_dir_repr = f"{new_phase_dir.ra.hms[0]:02.0f}h{new_phase_dir.ra.hms[1]:02.0f}m{new_phase_dir.ra.hms[2]:05.2f}s "\
                                     f"{new_phase_dir.dec.dms[0]:02.0f}d{abs(new_phase_dir.dec.dms[1]):02.0f}m{abs(new_phase_dir.dec.dms[2]):05.2f}s"
                 LOGGER.info(
@@ -832,8 +832,8 @@ def ms_create(ms_table_name, info,
                 rephased_data = da.empty_like(dask_data)
                 sel = da.ones(dask_data.shape[0], chunks=dask_data.chunks[0], dtype=bool)
                 rephased_data = \
-                    da.blockwise(__rephase_dask_wrapper, ('row','chan','corr'),
-                                 dask_data, ('row','chan','corr'),
+                    da.blockwise(__rephase_dask_wrapper, ('row', 'chan', 'corr'),
+                                 dask_data, ('row', 'chan', 'corr'),
                                  uvw_data, ('row', 'uvw'),
                                  map_row_to_zendir, ('row',),
                                  sel, ('row',),
@@ -846,8 +846,8 @@ def ms_create(ms_table_name, info,
                 if fill_model:
                     sel = da.ones(model_data.shape[0], chunks=model_data.chunks[0], dtype=bool)
                     rephased_data = \
-                        da.blockwise(__rephase_dask_wrapper, ('row','chan','corr'),
-                                     model_data, ('row','chan','corr'),
+                        da.blockwise(__rephase_dask_wrapper, ('row', 'chan', 'corr'),
+                                     model_data, ('row', 'chan', 'corr'),
                                      uvw_data, ('row', 'uvw'),
                                      map_row_to_zendir, ('row',),
                                      sel, ('row',),
@@ -863,8 +863,8 @@ def ms_create(ms_table_name, info,
                 for sfi in subfields.compute():
                     sel = map_row_to_zendir == sfi
                     rephased_data += \
-                        da.blockwise(__rephase_dask_wrapper, ('row','chan','corr'),
-                                     dask_data, ('row','chan','corr'),
+                        da.blockwise(__rephase_dask_wrapper, ('row', 'chan', 'corr'),
+                                     dask_data, ('row', 'chan', 'corr'),
                                      uvw_data, ('row', 'uvw'),
                                      map_row_to_zendir, ('row',),
                                      sel, ('row',),
@@ -879,8 +879,8 @@ def ms_create(ms_table_name, info,
                     for sfi in subfields.compute():
                         sel = map_row_to_zendir == sfi
                         rephased_data += \
-                            da.blockwise(__rephase_dask_wrapper, ('row','chan','corr'),
-                                         model_data, ('row','chan','corr'),
+                            da.blockwise(__rephase_dask_wrapper, ('row', 'chan', 'corr'),
+                                         model_data, ('row', 'chan', 'corr'),
                                          uvw_data, ('row', 'uvw'),
                                          map_row_to_zendir, ('row',),
                                          sel, ('row',),
@@ -915,7 +915,7 @@ def ms_create(ms_table_name, info,
                 uvw_data = da.from_array(np_uvw, chunks=(chunks['row'], 3))
                 LOGGER.info("<Done>")
             else:
-                raise RuntimeError("Rephaseing centroids must be 1 or a centre per original zenith position") 
+                raise RuntimeError("Rephaseing centroids must be 1 or a centre per original zenith position")
         else:
             LOGGER.info("No rephasing requested - field centers left as is")
 

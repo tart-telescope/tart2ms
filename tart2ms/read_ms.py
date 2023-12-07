@@ -1,5 +1,5 @@
 '''
-    Get Read data from a measurement set.
+    Read data from a measurement set.
     Author: Tim Molteno, tim@elec.ac.nz
     Copyright (c) 2019-2022.
 
@@ -19,11 +19,7 @@ from daskms import xds_from_table, xds_from_ms
 
 from .util import resolution_min_baseline, rayleigh_criterion
 
-logger = logging.getLogger("tart2ms")
-# logger.addHandler(
-#     logging.NullHandler()
-# )  # Add other handlers if you're using this as a library
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class RadioObservation(object):
