@@ -64,8 +64,10 @@ if __name__ == "__main__":
                         help=f"Rephase all visibilities to a new phase center. 'obs-midpoint' rephases to the zenith at the observation "
                              f"midpoint for the provided databases. Otherwise another known position can be given or a twelve digit J2000 epoch coordinate "
                              f"(e.g. J193900-632400). Currently recognized special positions are: {','.join(specpos)}")
+    parser.add_argument('--debug', action="store_true",
+                        help="Make verbose logs and store to a log file")
     parser.add_argument('--single-field', action="store_true",
-                        help="Write out single phase center for all observations")   
+                        help="Write out single phase center for all observations")
     parser.add_argument('--telescope_name', dest="override_telescope_name", required=False, default="TART",
                         help="Override telescope name with a JPL recognized telescope name - needed for some CASA tasks")
     parser.add_argument('--uncalibrated', dest="uncalibrated", required=False, action="store_true",
@@ -92,18 +94,32 @@ if __name__ == "__main__":
         return dt(*time.strptime(x, "%Y-%m-%dT%H:%M:%S")[:6])
     ARGS.timerange_start_utc = __parsedateISO8601(ARGS.timerange_start_utc) if ARGS.timerange_start_utc is not None else None
     ARGS.timerange_end_utc = __parsedateISO8601(ARGS.timerange_end_utc) if ARGS.timerange_end_utc is not None else None
-    logger = logging.getLogger("tart2ms")
-    logger.setLevel(logging.INFO)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-    fileHandler = logging.FileHandler(filename=f"tart2ms.{dt.now().timestamp()}.log")
-    fileHandler.setFormatter(formatter)
-    fileHandler.setLevel(level=logging.INFO)
-    logger.addHandler(fileHandler)
+
+    if ARGS.debug:
+        level = logging.DEBUG
+    else:
+        level = logging.ERROR
+
+    logger = logging.getLogger('tart2ms')
+    logger.setLevel(level)
+
+    if ARGS.debug:
+        fh = logging.FileHandler(filename=f"tart2ms.{dt.now().timestamp()}.log")
+        fh.setLevel(logging.DEBUG)
+
+        # create console handler and set level to debug
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+
+        # create formatter
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+        # add formatter to ch
+        ch.setFormatter(formatter)
+        fh.setFormatter(formatter)
+
+        # add ch to logger
+        logger.addHandler(ch)
 
     logger.info("TART2MS parameters:")
     for k in vars(ARGS).keys():

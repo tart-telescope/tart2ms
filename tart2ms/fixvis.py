@@ -14,8 +14,7 @@ import logging
 from progress.bar import FillingSquaresBar as bar
 import sys
 
-logger = logging.getLogger("tart2ms")
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class progress():
