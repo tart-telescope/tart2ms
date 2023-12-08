@@ -226,6 +226,7 @@ def ms_create(ms_table_name, info,
     except Exception:
         loc = info
 
+    print(f"Creating Measurement Set: frames={len(timestamps)}")
     lat, lon, height = loc["lat"], loc["lon"], loc["alt"]
     LOGGER.info("Telescope position (WGS84):")
     LOGGER.info(f"\tLat {lat}")

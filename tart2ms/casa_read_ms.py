@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0, snapshot=0, pol=0):
     res_arcmin = angular_resolution / 60.0
-    ms = table(ms_file)
+    ms = table(ms_file, ack=False)
 
     channel = np.array(channel)
     logger.debug(f"Reading channel {channel}")
@@ -26,7 +26,7 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
     logger.debug(f"keywordnames{ms.keywordnames()}")
     logger.debug(f"fields{ms.fieldnames()}")
 
-    ant = table(ms.getkeyword("ANTENNA"))
+    ant = table(ms.getkeyword("ANTENNA"), ack=False)
     ant_p = ant.getcol("POSITION")
     logger.debug("Antenna Positions {}".format(ant_p.shape))
 
@@ -34,7 +34,7 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
     subt = ms.query(f"FIELD_ID=={field_id}",
                     sortlist="ARRAY_ID", columns="TIME, DATA, UVW, ANTENNA1, ANTENNA2, FLAG, WEIGHT_SPECTRUM")
 
-    fields = table(subt.getkeyword("FIELD"))
+    fields = table(subt.getkeyword("FIELD"), ack=False)
     # field columns ['DELAY_DIR', 'PHASE_DIR', 'REFERENCE_DIR', 'CODE', 'FLAG_ROW', 'NAME', 'NUM_POLY', 'SOURCE_ID', 'TIME']
     phase_dir = fields.getcol("PHASE_DIR")[field_id][0]
     name = fields.getcol("NAME")[field_id]
@@ -75,7 +75,7 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
     ant2 = ant2[snapshot_indices]
 
     # Create datasets representing each row of the spw table
-    spw = table(ms.getkeyword("SPECTRAL_WINDOW"))
+    spw = table(ms.getkeyword("SPECTRAL_WINDOW"), ack=False)
     logger.debug(spw.colnames())
 
     frequencies = spw.getcol("CHAN_FREQ")[0]

@@ -20,12 +20,12 @@ TART_OBS=${DIR}
 # Get the last hours worth of data from the s3 bucket
 flyby:
 	rm -rf ${DIR}
-	tart_get_archive_data --dir ${DIR} --target ${TARGET} --start 2023-12-01T00:25:00 --duration 11
+	tart_get_archive_data --dir ${DIR} --target ${TARGET} --start 2023-12-01T00:25:00 --duration 5
 
 single_ms:
 	tart2ms  --hdf ${obsfiles} --clobber --ms ${MS}  --telescope_name "TART - signal"
 
-NUMBER_OF_FIELDS=779
+NUMBER_OF_FIELDS=239
 
 # Create a list of imaginary targets for each of the frames in the measurement set.
 baselist := $(shell for i in `seq 0 ${NUMBER_OF_FIELDS}`; do echo "${DIR}/${IMAGE}_"; done)
@@ -36,13 +36,13 @@ h5files  := $(addsuffix .h5, $(fileroots))
 
 SPHERE=--healpix --fov 170deg --res 1deg
 
-%.h5: ${MS}
-	$(eval FIELD := $(lastword $(subst _, ,$(basename $(notdir $@)))))
-	disko --ms ${MS} ${SPHERE} --field $(FIELD) --lasso --alpha 0.0015 --l1-ratio 0.02 --HDF $@
-
 #%.h5: ${MS}
 #	$(eval FIELD := $(lastword $(subst _, ,$(basename $(notdir $@)))))
-#	spotless --ms $< ${SPHERE} --field $(FIELD) --multimodel --HDF $@
+#	disko --ms ${MS} ${SPHERE} --field $(FIELD) --lasso --alpha 0.0015 --l1-ratio 0.02 --HDF $@
+
+%.h5: ${MS}
+	$(eval FIELD := $(lastword $(subst _, ,$(basename $(notdir $@)))))
+	spotless --ms $< ${SPHERE} --field $(FIELD) --multimodel --HDF $@
 
 
 # 2023-11-30T23:30:00
