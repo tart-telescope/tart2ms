@@ -105,11 +105,11 @@ if __name__ == "__main__":
 
     if ARGS.debug:
         fh = logging.FileHandler(filename=f"tart2ms.{dt.now().timestamp()}.log")
-        fh.setLevel(logging.DEBUG)
+        fh.setLevel(level)
 
         # create console handler and set level to debug
         ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
+        ch.setLevel(level)
 
         # create formatter
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -120,6 +120,7 @@ if __name__ == "__main__":
 
         # add ch to logger
         logger.addHandler(ch)
+        logger.addHandler(fh)
 
     logger.info("TART2MS parameters:")
     for k in vars(ARGS).keys():
