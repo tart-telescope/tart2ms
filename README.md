@@ -93,6 +93,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 ## Changelog
 
 - 0.6.0b2 Clean up the logging code. Add a --debug flag.
+          Get rid of the annoying printing of casa tables
 - 0.6.0b1 New casa_read_ms function similar to read_ms, but uses casacore - blindingly fast.
           made function signatures the same for both read_ms() and casa_read_ms().
 - 0.5.0b3 Remove noisy warnings. Add venv makefile.

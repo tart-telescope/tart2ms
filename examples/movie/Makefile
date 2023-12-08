@@ -1,15 +1,17 @@
 TARGET=signal
-DIR=flyby_${TARGET}
+NAME=hour
+DIR=${NAME}_${TARGET}
 MS=${DIR}.ms
+FIELDS=239
 
 IMAGE=image
 all:
 # 	make flyby TARGET=${TARGET}
 # 	make single_ms TARGET=${TARGET}
-	make h5 -j `nproc` TARGET=${TARGET}
-	make svg -j `nproc` TARGET=${TARGET}
-	make png -j `nproc` TARGET=${TARGET}
-	make webm -j `nproc` TARGET=${TARGET}
+	make h5 -j `nproc` TARGET=${TARGET} FIELDS=${FIELDS}
+	make svg -j `nproc` TARGET=${TARGET} FIELDS=${FIELDS}
+	make png -j `nproc` TARGET=${TARGET} FIELDS=${FIELDS}
+	make webm -j `nproc` TARGET=${TARGET} FIELDS=${FIELDS}
 
 .PRECIOUS: $(h5files)
 .PRECIOUS: $(svgfiles)
@@ -18,18 +20,24 @@ all:
 TART_OBS=${DIR}
 
 # Get the last hours worth of data from the s3 bucket
+hour:
+	rm -rf ${DIR}
+	tart_get_archive_data --dir ${DIR} --start -60 --duration 60
+
+# Get the interesting flyby with weird object that crosses the sky in a few minutes
+# Either a low-orbit satellite, a reentry vehicle, or a plane. Weird as it is transmitting in 
+# the GPS L1 band.
 flyby:
 	rm -rf ${DIR}
-	tart_get_archive_data --dir ${DIR} --target ${TARGET} --start 2023-12-01T00:25:00 --duration 5
+	tart_get_archive_data --dir ${DIR} --target ${TARGET} --start 2023-12-01T00:25:00 --duration 6
 
 single_ms:
 	tart2ms  --hdf ${obsfiles} --clobber --ms ${MS}  --telescope_name "TART - signal"
 
-NUMBER_OF_FIELDS=239
 
 # Create a list of imaginary targets for each of the frames in the measurement set.
-baselist := $(shell for i in `seq 0 ${NUMBER_OF_FIELDS}`; do echo "${DIR}/${IMAGE}_"; done)
-fileroots := $(join $(baselist), $(shell seq -w 0 ${NUMBER_OF_FIELDS}))
+baselist := $(shell for i in `seq 0 ${FIELDS}`; do echo "${DIR}/${IMAGE}_"; done)
+fileroots := $(join $(baselist), $(shell seq -w 0 ${FIELDS}))
 
 h5files  := $(addsuffix .h5, $(fileroots))
 
@@ -46,12 +54,6 @@ SPHERE=--healpix --fov 170deg --res 1deg
 
 
 # 2023-11-30T23:30:00
-
-
-# Get the last hours worth of data from the s3 bucket
-hour:
-	rm -rf ${DIR}
-	tart_get_archive_data --dir ${DIR} --start -60 --duration 60  --n 60
 
 
 # --rephase "J153145-454621"
