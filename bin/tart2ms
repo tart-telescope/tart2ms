@@ -86,6 +86,9 @@ if __name__ == "__main__":
                         help="Include only timestamps before this UTC time, e.g. 2022-03-23T23:30:12")
     parser.add_argument('--chunks-out', dest="chunks", required=False, default=10000,
                         help="Chunk sizes to use for MAIN table writeout")
+    parser.add_argument('--override-ant-pos', required=False, default=None, dest='override_ant_pos',
+                        help="Overrides antenna positions with external json file, keyed on antenna_positions with list of ENU tripples. "
+                             "Normally will use the antenna positions stored in the provided h5 or json files.")
     
     ARGS = parser.parse_args()
     def __parsedateISO8601(x):
@@ -166,7 +169,8 @@ if __name__ == "__main__":
                      write_extragalactic_catalogs=not ARGS.no_celestial_sources,
                      filter_end_utc=ARGS.timerange_end_utc,
                      filter_start_utc=ARGS.timerange_start_utc,
-                     chunks_out=ARGS.chunks)
+                     chunks_out=ARGS.chunks,
+                     override_ant_pos=ARGS.override_ant_pos)
 
     elif ARGS.hdf:
         logger.info("Getting Data from file: {}".format(ARGS.hdf))
@@ -182,7 +186,8 @@ if __name__ == "__main__":
                      write_extragalactic_catalogs=not ARGS.no_celestial_sources,
                      filter_end_utc=ARGS.timerange_end_utc,
                      filter_start_utc=ARGS.timerange_start_utc,
-                     chunks_out=ARGS.chunks)
+                     chunks_out=ARGS.chunks,
+                     override_ant_pos=ARGS.override_ant_pos)
 
     else:
         logger.info("Getting Data from API: {}".format(ARGS.api))
@@ -216,4 +221,5 @@ if __name__ == "__main__":
                      write_extragalactic_catalogs=not ARGS.no_celestial_sources,
                      filter_end_utc=ARGS.timerange_end_utc,
                      filter_start_utc=ARGS.timerange_start_utc,
-                     chunks_out=ARGS.chunks)
+                     chunks_out=ARGS.chunks,
+                     override_ant_pos=ARGS.override_ant_pos)
