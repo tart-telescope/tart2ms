@@ -227,6 +227,8 @@ def ms_create(ms_table_name, info,
         loc = info
 
     print(f"Creating Measurement Set: frames={len(timestamps)}")
+    print(f"Fields: 0..{len(timestamps)-1}")
+
     lat, lon, height = loc["lat"], loc["lon"], loc["alt"]
     LOGGER.info("Telescope position (WGS84):")
     LOGGER.info(f"\tLat {lat}")
@@ -1179,7 +1181,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 all_sources += online_sources if online_sources is not None else [None] * len(online_sources_timestamps)
                 all_sources_timestamps += online_sources_timestamps
         p.next()
-    LOGGER.info("<Done>")
+    print("<Done>")
     if tscount == 0:
         raise RuntimeError("Time filtering criteria resulted in an empty database. Goodbye!")
 

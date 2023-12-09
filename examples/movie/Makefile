@@ -62,7 +62,7 @@ SPHERE=--healpix --fov 170deg --res 1deg
 
 
 %.svg: %.h5
-	disko_draw --show-sources --SVG $@  $<
+	disko_draw --show-sources --min 0 --max 0.04 --SVG $@  $<
 
  
 %.png: %.svg

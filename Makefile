@@ -11,7 +11,7 @@ develop:
 	pip3 install -e .
 
 test:
-	python3 -m pytest -k TestReadMS
+	python3 -m pytest
 
 	
 lint:
