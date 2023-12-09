@@ -187,7 +187,8 @@ def ms_create(ms_table_name, info,
               writemodelcatalog=True,
               sources_timestamps=None,
               write_extragalactic_catalogs=True,
-              chunks_out=10000):
+              chunks_out=10000,
+              skip_sources_keywordtbl=False):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -450,7 +451,7 @@ def ms_create(ms_table_name, info,
     obs_table.append(dataset)
 
     # ----------------------------- SOURCE datasets -------------------------- #
-    if sources:
+    if sources and not skip_sources_keywordtbl:
         all_numlines = []
         all_name = []
         all_time = []
@@ -1060,9 +1061,40 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
     LOGGER.info(f"GNSS source catalogs retrieved for {len(downsampletimes)} timestamps, {ncache_objs} from local cache")
     return sources, downsampletimes
 
+def __load_ext_ant_pos(fn, ack=True):
+    """ Loads external antenna local ENU positions from json format 
+        The database must be keyed on 'antenna_positions' and have the following format
+        {
+            "antenna_positions": [
+                [E, 
+                 N, 
+                 U],
+                 ...
+            ]
+        }
+    """
+    if not os.path.exists(fn) and not os.path.isfile(fn):
+        raise RuntimeError(f"External antenna position file '{fn}' is not a valid file or does not exist")
+    with open(fn) as ffn:
+        ant_pos_dict = json.loads(ffn.read())
+        if "antenna_positions" not in ant_pos_dict.keys():
+            raise RuntimeError("Expected a dictionary keyed on 'antenna_positions'. Key does not exist")
+        ant_pos = ant_pos_dict['antenna_positions']
+        if not isinstance(ant_pos, list):
+            raise RuntimeError("Expected a list of ENU coordinates in external antenna positions file")
+        if not all(map(lambda x: isinstance(x, list) and len(x) == 3 and all(map(lambda xn: isinstance(xn, float), x)),
+                       ant_pos)):
+            raise RuntimeError("Expected a list of tripplets for antenna ENU positions")
+        ant_pos = np.array(ant_pos)
+        assert ant_pos.ndim == 2 and ant_pos.shape[1] == 3
+    if ack:
+        LOGGER.warning(f"Per user request will override antenna positions from externally provided database {fn}")
+    return ant_pos
+
 def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore",
                  applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
-                 write_extragalactic_catalogs=True, filter_start_utc=None, filter_end_utc=None, chunks_out=10000):
+                 write_extragalactic_catalogs=True, filter_start_utc=None, filter_end_utc=None, chunks_out=10000,
+                 override_ant_pos=None):
     if pol2:
         pol_feeds = ['RR', 'LL']
     else:
@@ -1077,7 +1109,10 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
     LOGGER.info("Will process HDF5 file: ")
     for h5 in h5file:
         LOGGER.info(f"\t '{h5}'")
-
+    if override_ant_pos:
+        ext_ant_pos = __load_ext_ant_pos(override_ant_pos)
+    else:
+        ext_ant_pos = None
     p = progress("Processing HDF database", max=len(h5file))
     all_sources = []
     all_sources_timestamps = []
@@ -1100,10 +1135,13 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
             config = settings.from_json(config_string)
             hdf_baselines = h5f['baselines'][:]
             hdf_phase_elaz = h5f['phase_elaz'][:]
+            if ext_ant_pos is None:
+                ant_pos = h5f['antenna_positions'][:]
+                if ant_pos_orig is None:
+                    ant_pos_orig = ant_pos.copy()
+            else:
+                ant_pos = ant_pos_orig = ext_ant_pos
 
-            ant_pos = h5f['antenna_positions'][:]
-            if ant_pos_orig is None:
-                ant_pos_orig = ant_pos.copy()
             if not np.isclose(ant_pos_orig, ant_pos, atol=1.0e-1, rtol=1.0).all():
                 raise RuntimeError("The databases you are trying to concatenate have different antenna layouts. "
                                    "This is not yet supported. You could try running CASA virtualconcat to "
@@ -1209,7 +1247,8 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name,
                  uvw_generator="casacore", json_data=None, applycal=True, fill_model=False,
                  writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
-                 write_extragalactic_catalogs=True, filter_start_utc=None, filter_end_utc=None, chunks_out=10000):
+                 write_extragalactic_catalogs=True, filter_start_utc=None, filter_end_utc=None, chunks_out=10000,
+                 override_ant_pos=None):
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
@@ -1226,7 +1265,11 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
     else:
         raise ValueError(
             "Either json_filename or json_data arguments should be given")
-
+    if override_ant_pos:
+        ext_ant_pos = __load_ext_ant_pos(override_ant_pos)
+    else:
+        ext_ant_pos = None
+        
     all_times = []
     all_vis = []
     all_sources = []
@@ -1245,8 +1288,12 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         if not applycal:
             gains[...] = 1.0
             phases[...] = 0.0
-        if ant_pos_orig is None:
-            ant_pos_orig = ant_pos.copy()
+        if ext_ant_pos is None:
+            if ant_pos_orig is None:
+                ant_pos_orig = ant_pos.copy()
+        else:
+            ant_pos = ant_pos_orig = ext_ant_pos
+        
         if not np.isclose(ant_pos_orig, ant_pos, atol=1.0e-1, rtol=1.0).all():
             raise RuntimeError("The databases you are trying to concatenate have different antenna layouts. "
                                "This is not yet supported. You could try running CASA virtualconcat to "
