@@ -21,7 +21,7 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
     ms = table(ms_file, ack=False)
 
     channel = np.array(channel)
-    logger.debug(f"Reading channel {channel}")
+    logger.info(f"Reading channel {channel}")
     logger.debug(f"colnames{ms.colnames()}")
     logger.debug(f"keywordnames{ms.keywordnames()}")
     logger.debug(f"fields{ms.fieldnames()}")
@@ -32,7 +32,7 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
 
     # Now use TAQL to select only good data from the correct field
     subt = ms.query(f"FIELD_ID=={field_id}",
-                    sortlist="ARRAY_ID", columns="TIME, DATA, UVW, ANTENNA1, ANTENNA2, FLAG, WEIGHT_SPECTRUM")
+                    sortlist="ARRAY_ID", columns="TIME, DATA, UVW, ANTENNA1, ANTENNA2, FLAG")
 
     fields = table(subt.getkeyword("FIELD"), ack=False)
     # field columns ['DELAY_DIR', 'PHASE_DIR', 'REFERENCE_DIR', 'CODE', 'FLAG_ROW', 'NAME', 'NUM_POLY', 'SOURCE_ID', 'TIME']
@@ -65,8 +65,16 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
     logger.debug(f"flags = {flags.shape}")
     logger.debug(f"channel = {channel.shape}")
 
-    weight_spectrum = subt.getcol("WEIGHT_SPECTRUM")[snapshot_indices, :, pol][:, channel]
     raw_vis = subt.getcol("DATA")[snapshot_indices, :, pol][:, channel]
+
+    try:
+        # Deal with the case where WEIGHT_SPECTRUM is not present.s
+        subt = ms.query(f"FIELD_ID=={field_id}",
+                        sortlist="ARRAY_ID", columns="WEIGHT_SPECTRUM")
+        weight_spectrum = subt.getcol("WEIGHT_SPECTRUM")[snapshot_indices, :, pol][:, channel]
+    except RuntimeError as e:
+        logger.debug(f"{e}")
+        weight_spectrum = np.ones_like(raw_vis)
 
     flags = flags[snapshot_indices, :, pol][:, channel]
     uvw = uvw[snapshot_indices, :]
