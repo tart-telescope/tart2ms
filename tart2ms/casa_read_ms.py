@@ -63,15 +63,18 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
 
     flags = subt.getcol("FLAG")
     logger.debug(f"flags = {flags.shape}")
-    logger.debug(f"channel = {channel.shape}")
+    logger.debug(f"channel = {channel}")
 
-    raw_vis = subt.getcol("DATA")[snapshot_indices, :, pol][:, channel]
+    raw_vis = subt.getcol("DATA")
+    logger.debug(f"raw_vis {raw_vis.shape}")
+    raw_vis = raw_vis[snapshot_indices, :, pol][:, channel]
+    logger.debug(f"raw_vis {raw_vis.shape}")
 
     try:
         # Deal with the case where WEIGHT_SPECTRUM is not present.s
-        subt = ms.query(f"FIELD_ID=={field_id}",
+        subt_ws = ms.query(f"FIELD_ID=={field_id}",
                         sortlist="ARRAY_ID", columns="WEIGHT_SPECTRUM")
-        weight_spectrum = subt.getcol("WEIGHT_SPECTRUM")[snapshot_indices, :, pol][:, channel]
+        weight_spectrum = subt_ws.getcol("WEIGHT_SPECTRUM")[snapshot_indices, :, pol][:, channel]
     except RuntimeError as e:
         logger.debug(f"{e}")
         weight_spectrum = np.ones_like(raw_vis)
@@ -145,7 +148,7 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
         )
         indices = np.sort(indices)     # sort the indices to keep them in order (speeds up IO)
 
-    logger.debug(f"Indices {indices.shape}")
+    logger.debug(f"Indices {indices}")
 
     #
     #   Now read the remaining data
