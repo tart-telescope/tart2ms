@@ -92,6 +92,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.6.0b4 Correct debug calculation of rayleigh limit in read_ms.
 - 0.6.0b3 If WEIGHT_SPECTRUM is not present, then subsititude ones
 - 0.6.0b2 Clean up the logging code. Add a --debug flag.
           Get rid of the annoying printing of casa tables

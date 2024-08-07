@@ -29,7 +29,7 @@ if __name__ == "__main__":
     parser.add_argument('--ms', required=False,
                         default='tart.ms', help="Output MS table name.")
     parser.add_argument('--api', required=False,
-                        default='https://tart.elec.ac.nz/signal', help="Telescope API server URL.")
+                        default='https://tart.elec.ac.nz/tart/mu-udm/', help="Telescope API server URL.")
     parser.add_argument('--catalog', required=False,
                         default='https://tart.elec.ac.nz/catalog', help="Catalog API URL.")
     parser.add_argument('--vis', required=False, default=None,

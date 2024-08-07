@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0, snapshot=0, pol=0):
     res_arcmin = angular_resolution / 60.0
     ms = table(ms_file, ack=False)
+    logger.info(f"CASA read ms {ms_file}")
 
     channel = np.array(channel)
     logger.info(f"Reading channel {channel}")
@@ -115,14 +116,14 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
     # 1.0 / 2*np.sin(theta) = limit_u
     limit_uvw = np.max(np.abs(uvw), 0)
 
-    res_limit = rayleigh_criterion(baseline_lengths=limit_uvw[0], max_freq=np.max(frequency))
+    bl = np.sqrt(uvw[:, 0] ** 2 + uvw[:, 1] ** 2 + uvw[:, 2] ** 2)
+    res_limit = rayleigh_criterion(max_freq=np.max(frequency), baseline_lengths=bl)
     logger.debug(
         "Nyquist resolution: {:g} arcmin".format(
-            np.degrees(res_limit) * 60.0
+            res_limit * 60.0
         )
     )
 
-    bl = np.sqrt(uvw[:, 0] ** 2 + uvw[:, 1] ** 2 + uvw[:, 2] ** 2)
     good_data = np.array(
         np.where((flags == 0) & (bl < bl_max))
     ).T.reshape((-1,))

@@ -43,6 +43,7 @@ def rayleigh_criterion(max_freq, baseline_lengths):
     min_baseline = np.min(baseline_lengths)
 
     LOGGER.debug("Baseline lengths:")
+    LOGGER.debug(f"{baseline_lengths}")
     LOGGER.debug(f"\tMinimum: {min_baseline:.4f} m")
     LOGGER.debug(
         f"\tMaximum: {max_baseline:.4f} m --- {max_baseline/min_wl:.4f} wavelengths")
