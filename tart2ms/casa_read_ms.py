@@ -13,7 +13,7 @@ import numpy as np
 
 from casacore.tables import table
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tart2ms")
 
 
 def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0, snapshot=0, pol=0):

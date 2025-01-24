@@ -19,7 +19,7 @@ from daskms import xds_from_table, xds_from_ms
 
 from .util import resolution_min_baseline, rayleigh_criterion
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tart2ms")
 
 
 class RadioObservation(object):
