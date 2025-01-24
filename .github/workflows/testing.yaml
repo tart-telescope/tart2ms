@@ -1,6 +1,10 @@
 name: Run unit tests
 
-on: [push]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '30 4 * * 1' # Every Monday @ 4h30am UTC
 
 jobs:
   build:
