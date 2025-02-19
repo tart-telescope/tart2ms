@@ -59,7 +59,7 @@ dask.config.set(scheduler='processes')  # overwrite default with threaded schedu
 # dask.config.set(scheduler='synchronous')  # overwrite default with threaded scheduler
 
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("tart2ms")
 
 '''
 The following from Oleg Smirnov.
@@ -226,9 +226,6 @@ def ms_create(ms_table_name, info,
         loc = info['location']
     except Exception:
         loc = info
-
-    print(f"Creating Measurement Set: frames={len(timestamps)}")
-    print(f"Fields: 0..{len(timestamps)-1}")
 
     lat, lon, height = loc["lat"], loc["lon"], loc["alt"]
     LOGGER.info("Telescope position (WGS84):")

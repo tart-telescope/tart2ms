@@ -27,7 +27,7 @@ TEST_JSON = 'tart2ms/tests/data_test.json'
 TMP_MS = os.path.join(tempfile.gettempdir(), 'test.ms')
 TEST_MS = 'test.ms'
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tart2ms")
 # Add a null handler so logs can go somewhere
 logger.addHandler(logging.NullHandler())
 logger.setLevel(logging.INFO)

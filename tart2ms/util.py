@@ -16,7 +16,7 @@ from astropy import constants
 from astropy.coordinates import SkyCoord
 # from astropy import units as u
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("tart2ms")
 
 
 def get_wavelength(frequency):

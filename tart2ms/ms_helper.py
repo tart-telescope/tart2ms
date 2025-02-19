@@ -18,14 +18,14 @@ from astropy.constants import c
 from tart2ms.catalogs.catalog_reader import catalog_factory
 from tart2ms.fixvis import progress
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tart2ms")
 
 AFRICANUS_DFT_AVAIL = True
 try:
     from africanus.rime.dask import wsclean_predict
     from africanus.coordinates.dask import radec_to_lm
 except ImportError:
-    #logger.warning("Cannot import Africanus API. MODEL_DATA filling capabilities disabled")
+    logger.warning("Cannot import Africanus API. MODEL_DATA filling capabilities disabled")
     AFRICANUS_DFT_AVAIL = False
 
 def azel2radec(az, el, location, obstime, distance=None):

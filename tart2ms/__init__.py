@@ -11,6 +11,3 @@ from .tart2ms import ms_from_json, ms_from_hdf5
 from .read_ms import read_ms
 from .casa_read_ms import read_ms as casa_read_ms
 from .ms_helper import get_array_location
-
-import logging
-logging.getLogger(__name__).addHandler(logging.NullHandler())

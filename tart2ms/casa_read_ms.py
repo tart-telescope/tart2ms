@@ -13,12 +13,12 @@ import numpy as np
 
 from casacore.tables import table
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tart2ms")
 
 
 def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0, snapshot=0, pol=0):
     res_arcmin = angular_resolution / 60.0
-    ms = table(ms_file, ack=False)
+    ms = table(ms_file, ack=False, readonly=True, lockoptions='auto')
     logger.info(f"CASA read ms {ms_file}")
 
     channel = np.array(channel)

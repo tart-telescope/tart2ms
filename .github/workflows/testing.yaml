@@ -1,6 +1,10 @@
 name: Run unit tests
 
-on: [push]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '30 4 * * 1' # Every Monday @ 4h30am UTC
 
 jobs:
   build:
@@ -8,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
 
     steps:
       - uses: actions/checkout@v3
@@ -21,7 +25,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install flake8 pytest
           pip install .
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Lint with flake8
         run: |
           # stop the build if there are Python syntax errors or undefined names
