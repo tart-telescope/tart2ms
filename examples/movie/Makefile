@@ -62,7 +62,7 @@ SPHERE=--healpix --fov 170deg --res 1deg
 
 
 %.svg: %.h5
-	disko_draw --show-sources --min 0 --max 0.04 --SVG $@  $<
+	disko_draw --show-sources --min 0 --max 0.025 --SVG $@  $<
 
  
 %.png: %.svg
@@ -88,13 +88,14 @@ clean:
 	rm -f ${svgfiles}
 	rm -f ${pngfiles}
 	rm -f ${h5files}
-	
-mov: $(pngfiles)
-	cd ${TART_OBS} && ffmpeg -framerate 3  -i 'obs_%d.png' \
-		-c:v libx264 -pix_fmt yuv420p tim_tart_obs.mp4
 
-FFMPEG_OPT=-framerate 25 -pattern_type glob -i '${TART_OBS}/image_*.png' -vf scale=720:-1 -c:v libvpx-vp9 -b:v 1M -pix_fmt yuv420p
+WEBM=-c:v libvpx-vp9 -b:v 1M
+FFMPEG_OPT=-framerate 25 -pattern_type glob -i '${TART_OBS}/image_*.png' -vf scale=720:-1 -pix_fmt yuv420p
+
+mov: $(pngfiles)
+	ffmpeg ${FFMPEG_OPT} -c:v libx264  ${NAME}_${TARGET}.mp4
+
 
 webm: $(pngfiles)
-	ffmpeg ${FFMPEG_OPT} -pass 1 -an -f null /dev/null
-	ffmpeg ${FFMPEG_OPT} -pass 2 -c:a libopus output_${TARGET}.webm
+	ffmpeg ${FFMPEG_OPT} ${WEBM} -pass 1 -an -f null /dev/null
+	ffmpeg ${FFMPEG_OPT} ${WEBM} -pass 2 -c:a libopus ${NAME}_${TARGET}.webm

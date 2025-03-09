@@ -1116,7 +1116,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
     tscount = 0
     for ih5, h5 in enumerate(h5file):
         with h5py.File(h5, "r") as h5f:
-            config_string = np.string_(h5f['config'][0]).decode('UTF-8')
+            config_string = np.bytes_(h5f['config'][0]).decode('UTF-8')
             if ih5 == 0:
                 LOGGER.debug("config_string = {}".format(config_string))
 
