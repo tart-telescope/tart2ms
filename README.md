@@ -12,7 +12,7 @@ Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measureme
 
 ## Examples
 
-Download data from the TART in real time via the RESTful API (defaults to using the API at https://tart.elec.ac.nz/signal):
+Download data from the TART in real time via the RESTful API (defaults to using the API at https://api.elec.ac.nz/tart/mu-udm):
 
     tart2ms --ms data.ms
 
@@ -73,7 +73,7 @@ This will create an image called test-image.fits. You will need to install wscle
     --hdf HDF          Visibility hdf5 file (One minutes worth of visibility data). (default: None)
     --ms MS            Output MS table name. (default: tart.ms)
     --api API          Telescope API server URL. (default:
-                        https://tart.elec.ac.nz/signal)
+                        https://api.elec.ac.nz/tart/mu-udm)
     --catalog CATALOG  Catalog API URL. (default:
                         https://tart.elec.ac.nz/catalog)
     --vis VIS          Use a local JSON file containing the visibilities for

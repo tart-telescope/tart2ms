@@ -1,7 +1,7 @@
 #!/bin/bash
 # pip3 install tart_tools --upgrade
 # Needs v1.1.2b1 to fix a bug when checksumming partially downloaded local files.
-TART_API=https://tart.elec.ac.nz/${TARGET}/
+TART_API=https://api.elec.ac.nz/tart/${TARGET}/
 DIR=data_${TARGET}
 rm -rf ${DIR}
 mkdir -p ${DIR}
