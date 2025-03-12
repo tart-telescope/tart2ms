@@ -16,7 +16,7 @@ setup(
     description='Convert TART observation data to Measurement Sets',
     long_description=readme,
     long_description_content_type="text/markdown",
-    url='http://github.com/tmolteno/tart2ms',
+    url='http://github.com/tart-telescope/tart2ms',
     author='Tim Molteno',
     author_email='tim@elec.ac.nz',
     license='GPLv3',
