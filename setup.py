@@ -39,6 +39,8 @@ setup(
                     'astropy<=7.0.0; python_version>="3.10" and python_version<"3.12"',
                     # 3.12, 3.13...
                     'python-casacore; python_version>="3.12"',
+                    'dask_ms<=0.2.21; python_version>="3.12"',
+                    'dask<=2024.10.0; python_version>="3.12"',
                     'numpy; python_version>="3.12"',
                     'scipy; python_version>="3.12"',
                     'pandas; python_version>="3.12"',
