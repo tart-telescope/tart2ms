@@ -25,7 +25,6 @@ from .ms_helper import (azel2radec,
 from hashlib import sha256
 from itertools import product
 from casacore.quanta import quantity
-from daskms import Dataset, xds_to_table, xds_from_ms
 
 from astropy import coordinates as ac
 from astropy.time import Time
