@@ -12,7 +12,7 @@ with open('README.md') as f:
 
 setup(
     name='tart2ms',
-    version='0.6.0b6',
+    version='0.6.0b7',
     description='Convert TART observation data to Measurement Sets',
     long_description=readme,
     long_description_content_type="text/markdown",
