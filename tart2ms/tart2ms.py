@@ -1004,7 +1004,7 @@ def __print_infodict_keys(dico_info, keys, just=25):
 def __fetch_sources(timestamps, observer_lat, observer_lon, 
                     retry=5, retry_time=1, force_recache=False, 
                     filter_elevation=45.,
-                    filter_name=r"(?:^GPS.*)|(?:^QZS.*)",
+                    filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
                     downsample=10.0):    
     cache_dir = os.path.join(".", ".tartcache")
     if not os.path.exists(cache_dir):

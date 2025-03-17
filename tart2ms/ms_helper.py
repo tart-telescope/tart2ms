@@ -156,7 +156,7 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                   sources, epoch_s_sources, sources_obstime,
                   writemodelcatalog,
                   filter_elevation=45.,
-                  filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^CELESTIAL_.*)|(?:^SOLAR_.*)",
+                  filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)|(?:^CELESTIAL_.*)|(?:^SOLAR_.*)",
                   cat_name_prefix="model_sources_",
                   append_catalog=False,
                   default_flux=1e5):
