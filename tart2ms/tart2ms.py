@@ -25,7 +25,6 @@ from .ms_helper import (azel2radec,
 from hashlib import sha256
 from itertools import product
 from casacore.quanta import quantity
-from daskms import Dataset, xds_to_table, xds_from_ms
 
 from astropy import coordinates as ac
 from astropy.time import Time
@@ -38,6 +37,9 @@ from tart.imaging import calibration
 
 from tart_tools import (api_imaging,
                         api_handler)
+
+from daskms import xds_to_table
+from daskms import Dataset
 
 import logging
 import json
@@ -289,7 +291,7 @@ def ms_create(ms_table_name, info,
     # can represent all rows with one dataset
     num_ant = len(ant_pos)
 
-    # Now convert each antenna location to ECEF coordinates for the measurement set
+    # Now convert each antenna location to ECEF coordinates for the MS
     # This is laborious but seems to work.
     #
     # Zero is due north.
@@ -297,9 +299,12 @@ def ms_create(ms_table_name, info,
     ant_s = [np.sqrt(a[0]*a[0] + a[1]*a[1]) for a in ant_pos]
     ant_distance = [(s / R_earth.value) for s in ant_s]
 
-    ant_lon_lat = [ac.offset_by(lon=lon*u.deg, lat=lat*u.deg, posang=theta, distance=d)
+    ant_lon_lat = [ac.offset_by(lon=lon*u.deg, lat=lat*u.deg,
+                                posang=theta, distance=d)
                    for theta, d in zip(ant_posang, ant_distance)]
-    ant_locations = [EarthLocation.from_geodetic(lon=lon,  lat=lat, height=loc['alt']*u.m,  ellipsoid='WGS84')
+    ant_locations = [EarthLocation.from_geodetic(lon=lon,  lat=lat,
+                                                 height=loc['alt']*u.m,
+                                                 ellipsoid='WGS84')
                      for lon, lat in ant_lon_lat]
     ant_positions = [[e.x.value, e.y.value, e.z.value] for e in ant_locations]
     antenna_itrf_pos = position = da.asarray(ant_positions)
@@ -1116,7 +1121,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
     tscount = 0
     for ih5, h5 in enumerate(h5file):
         with h5py.File(h5, "r") as h5f:
-            config_string = np.string_(h5f['config'][0]).decode('UTF-8')
+            config_string = np.bytes_(h5f['config'][0]).decode('UTF-8')
             if ih5 == 0:
                 LOGGER.debug("config_string = {}".format(config_string))
 
