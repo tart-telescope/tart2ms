@@ -49,6 +49,7 @@ import dateutil
 import time
 import os
 import re
+import sys
 
 import dask.array as da
 import numpy as np
@@ -190,7 +191,8 @@ def ms_create(ms_table_name, info,
               sources_timestamps=None,
               write_extragalactic_catalogs=True,
               chunks_out=10000,
-              skip_sources_keywordtbl=False):
+              skip_sources_keywordtbl=False,
+              cat_name_prefix="model_sources_"):
     ''' Create a Measurement Set from some TART observations
 
     Parameters
@@ -780,7 +782,8 @@ def ms_create(ms_table_name, info,
                                        map_row_to_zendir,
                                        location,
                                        sources, epoch_s_sources, sources_obstime,
-                                       writemodelcatalog)
+                                       writemodelcatalog,
+                                       cat_name_prefix=cat_name_prefix)
             if model_data is None:
                 model_data = da.zeros_like(dask_data)
             cat_sources = get_catalog_sources_azel(obstime, location)
@@ -796,27 +799,29 @@ def ms_create(ms_table_name, info,
                                                 cat_sources, epoch_s, obstime,
                                                 writemodelcatalog,
                                                 filter_elevation=20.0,
-                                                append_catalog=True)
+                                                append_catalog=True,
+                                                cat_name_prefix=cat_name_prefix)
                 if celestial_model is None:
                     celestial_model = da.zeros_like(dask_data)
                 model_data += celestial_model
-            LOGGER.info(f"Predicting Sun and Moon positions for {len(epoch_s)} timestamps")
-            cat_sources = get_solar_system_bodies(obstime, location)
-            solar_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype,
-                                        uvw_data,
-                                        epoch_s, spw_chan_freqs, spw_i,
-                                        zenith_directions,
-                                        map_row_to_zendir,
-                                        location,
-                                        cat_sources, epoch_s, obstime,
-                                        writemodelcatalog,
-                                        filter_elevation=20.0,
-                                        append_catalog=True)
+                LOGGER.info(f"Predicting Sun and Moon positions for {len(epoch_s)} timestamps")
+                cat_sources = get_solar_system_bodies(obstime, location)
+                solar_model = predict_model(dask_data.shape, dask_data.chunks, dask_data.dtype,
+                                            uvw_data,
+                                            epoch_s, spw_chan_freqs, spw_i,
+                                            zenith_directions,
+                                            map_row_to_zendir,
+                                            location,
+                                            cat_sources, epoch_s, obstime,
+                                            writemodelcatalog,
+                                            filter_elevation=20.0,
+                                            append_catalog=True,
+                                            cat_name_prefix=cat_name_prefix)
 
-            if solar_model is None:
-                solar_model = da.zeros_like(dask_data)
-            model_data += solar_model
-            model_data.rechunk(dask_data.chunks)
+                if solar_model is None:
+                    solar_model = da.zeros_like(dask_data)
+                model_data += solar_model
+                model_data.rechunk(dask_data.chunks)
 
         def __rephase_dask_wrapper(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
             vis = np.array(vis[0]) if isinstance(vis, list) else vis
@@ -965,9 +970,11 @@ def ms_create(ms_table_name, info,
 
     # execute graph with futures
     LOGGER.info("Synthesizing MS...")
-    with ProgressBar():
+    if sys.stdout.isatty():
+        with ProgressBar():
+            dask.compute([ms_writes + spw_writes + ddid_writes] + MSTable.get_futures())
+    else:
         dask.compute([ms_writes + spw_writes + ddid_writes] + MSTable.get_futures())
-
     LOGGER.info("Performing finalization of UVW coordinates if needed")
     if uvw_generator == 'telescope_snapshot':
         pass # user has been warned about their choice -- this cannot be used when rephasing
@@ -1009,7 +1016,7 @@ def __print_infodict_keys(dico_info, keys, just=25):
 def __fetch_sources(timestamps, observer_lat, observer_lon, 
                     retry=5, retry_time=1, force_recache=False, 
                     filter_elevation=45.,
-                    filter_name=r"(?:^GPS.*)|(?:^QZS.*)",
+                    filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
                     downsample=10.0):    
     cache_dir = os.path.join(".", ".tartcache")
     if not os.path.exists(cache_dir):
@@ -1096,7 +1103,7 @@ def __load_ext_ant_pos(fn, ack=True):
 def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore",
                  applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
                  write_extragalactic_catalogs=True, filter_start_utc=None, filter_end_utc=None, chunks_out=10000,
-                 override_ant_pos=None):
+                 override_ant_pos=None, cat_name_prefix=None):
     if pol2:
         pol_feeds = ['RR', 'LL']
     else:
@@ -1243,14 +1250,15 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
               fill_model=fill_model,
               writemodelcatalog=writemodelcatalog,
               write_extragalactic_catalogs=write_extragalactic_catalogs,
-              chunks_out=chunks_out)
+              chunks_out=chunks_out,
+              cat_name_prefix=cat_name_prefix)
 
 
 def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_telescope_name,
                  uvw_generator="casacore", json_data=None, applycal=True, fill_model=False,
                  writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
                  write_extragalactic_catalogs=True, filter_start_utc=None, filter_end_utc=None, chunks_out=10000,
-                 override_ant_pos=None):
+                 override_ant_pos=None, cat_name_prefix=None):
     # Load data from a JSON file
     if json_filename is not None and json_data is None:
         if isinstance(json_filename, str):
@@ -1397,4 +1405,5 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
               fill_model=fill_model,
               writemodelcatalog=writemodelcatalog,
               write_extragalactic_catalogs=write_extragalactic_catalogs,
-              chunks_out=chunks_out)
+              chunks_out=chunks_out,
+              cat_name_prefix=cat_name_prefix)

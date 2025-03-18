@@ -94,6 +94,9 @@ if __name__ == "__main__":
     parser.add_argument('--override-ant-pos', required=False, default=None, dest='override_ant_pos',
                         help="Overrides antenna positions with external json file, keyed on antenna_positions with list of ENU tripples. "
                              "Normally will use the antenna positions stored in the provided h5 or json files.")
+    parser.add_argument("--model-catalog-name-prefix", required=False, default="model_sources_", dest="model_catalog_name_prefix",
+                        help="Specify model catalog name prefix. Can be used to write model catalogs to another folder. Only effective in "
+                             "combination with --write-model-catalog")
     
     ARGS = parser.parse_args()
     def __parsedateISO8601(x):
@@ -190,7 +193,8 @@ if __name__ == "__main__":
                      filter_end_utc=ARGS.timerange_end_utc,
                      filter_start_utc=ARGS.timerange_start_utc,
                      chunks_out=ARGS.chunks,
-                     override_ant_pos=ARGS.override_ant_pos)
+                     override_ant_pos=ARGS.override_ant_pos,
+                     cat_name_prefix=ARGS.model_catalog_name_prefix)
 
     elif ARGS.hdf:
         logger.info("Getting Data from file: {}".format(ARGS.hdf))
@@ -207,7 +211,8 @@ if __name__ == "__main__":
                      filter_end_utc=ARGS.timerange_end_utc,
                      filter_start_utc=ARGS.timerange_start_utc,
                      chunks_out=ARGS.chunks,
-                     override_ant_pos=ARGS.override_ant_pos)
+                     override_ant_pos=ARGS.override_ant_pos,
+                     cat_name_prefix=ARGS.model_catalog_name_prefix)
 
     else:
         logger.info("Getting Data from API: {}".format(ARGS.api))
@@ -242,4 +247,5 @@ if __name__ == "__main__":
                      filter_end_utc=ARGS.timerange_end_utc,
                      filter_start_utc=ARGS.timerange_start_utc,
                      chunks_out=ARGS.chunks,
-                     override_ant_pos=ARGS.override_ant_pos)
+                     override_ant_pos=ARGS.override_ant_pos,
+                     cat_name_prefix=ARGS.model_catalog_name_prefix)
