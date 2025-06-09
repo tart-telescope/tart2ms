@@ -1005,13 +1005,15 @@ def ms_create(ms_table_name, info,
     end_time = time.time()
     elapsed = (end_time - start_time)
     LOGGER.info(f"Measurement set writing complete. Took {elapsed // 60:.0f}m{elapsed % 60.:.2f}s")
-    
+
+
 def __print_infodict_keys(dico_info, keys, just=25):
     LOGGER.info("Observatory parameters:")
     for k in keys:
         val = dico_info.get(k, "Information Unavailable")
         reprk = str(k).ljust(just, " ")
         LOGGER.info(f"\t{reprk}: {val}")
+
 
 def __fetch_sources(timestamps, observer_lat, observer_lon, 
                     retry=5, retry_time=1, force_recache=False, 
@@ -1070,6 +1072,7 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
     LOGGER.info(f"GNSS source catalogs retrieved for {len(downsampletimes)} timestamps, {ncache_objs} from local cache")
     return sources, downsampletimes
 
+
 def __load_ext_ant_pos(fn, ack=True):
     """ Loads external antenna local ENU positions from json format 
         The database must be keyed on 'antenna_positions' and have the following format
@@ -1099,6 +1102,7 @@ def __load_ext_ant_pos(fn, ack=True):
     if ack:
         LOGGER.warning(f"Per user request will override antenna positions from externally provided database {fn}")
     return ant_pos
+
 
 def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_name, uvw_generator="casacore",
                  applycal=True, fill_model=False, writemodelcatalog=True, fetch_sources=True, catalog_recache=False,
@@ -1279,7 +1283,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
         ext_ant_pos = __load_ext_ant_pos(override_ant_pos)
     else:
         ext_ant_pos = None
-        
+
     all_times = []
     all_vis = []
     all_sources = []
@@ -1303,7 +1307,7 @@ def ms_from_json(ms_name, json_filename, pol2, phase_center_policy, override_tel
                 ant_pos_orig = ant_pos.copy()
         else:
             ant_pos = ant_pos_orig = ext_ant_pos
-        
+
         if not np.isclose(ant_pos_orig, ant_pos, atol=1.0e-1, rtol=1.0).all():
             raise RuntimeError("The databases you are trying to concatenate have different antenna layouts. "
                                "This is not yet supported. You could try running CASA virtualconcat to "
