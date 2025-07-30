@@ -7,8 +7,7 @@ name = "tart2ms"
 version = '0.7.0rc2'
 description = "Convert TART observation data to Measurement Sets"
 readme = "README.md"
-license = "GPLv3"
-requires-python = ">=3.11,<3.14"
+license = "GPL-3.0-or-later"
 authors = [
     { name = "Tim Molteno", email = "tim@elec.ac.nz" },
 ]
