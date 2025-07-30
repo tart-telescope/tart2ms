@@ -19,10 +19,10 @@ from tart2ms import ms_from_json, ms_from_hdf5, util
 from datetime import datetime as dt
 from tart2ms.catalogs.catalog_reader import catalog_factory
 
-import logging
 logger = logging.getLogger("tart2ms")
 
-if __name__ == "__main__":
+
+def main():
     parser = argparse.ArgumentParser(description='Generate measurement set from a JSON file from the TART radio telescope.',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--json', required=False, default=None, nargs="*",
