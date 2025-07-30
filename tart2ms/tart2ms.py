@@ -1198,7 +1198,7 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
                 if filter_end_utc and ts > filter_end_utc: continue
                 tscount += 1
                 ts_this_h5 += 1
-                vis = Visibility(config=config, timestamp=ts)
+                vis = Visibility.from_config(config=config, timestamp=ts)
                 vis.set_visibilities(v=v, b=hdf_baselines.tolist())
                 vis.phase_el = hdf_phase_elaz[0]
                 vis.phase_az = hdf_phase_elaz[1]

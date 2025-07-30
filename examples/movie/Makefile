@@ -22,7 +22,7 @@ TART_OBS=${DIR}
 # Get the last hours worth of data from the s3 bucket
 hour:
 	rm -rf ${DIR}
-	tart_get_archive_data --dir ${DIR} --start -60 --duration 60
+	tart_get_archive_data --target ${TARGET} --dir ${DIR} --start -60 --duration 60
 
 # Get the interesting flyby with weird object that crosses the sky in a few minutes
 # Either a low-orbit satellite, a reentry vehicle, or a plane. Weird as it is transmitting in 
