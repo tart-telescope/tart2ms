@@ -4,10 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tart2ms"
-version = '0.7.1'
+version = '0.7.2'
 description = "Convert TART observation data to Measurement Sets"
 readme = "README.md"
 license = "GPL-3.0-or-later"
+requires-python = ">=3.11,<3.14"
 authors = [
     { name = "Tim Molteno", email = "tim@elec.ac.nz" },
 ]
@@ -65,7 +66,7 @@ predict = [
     "codex-africanus (>=0.3.4)"
 ]
 
-[tool.poetry.scripts]
+[project.scripts]
 tart2ms = "tart2ms.scripts.tart2ms:main"
 
 [project.urls]
