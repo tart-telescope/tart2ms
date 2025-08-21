@@ -1027,18 +1027,19 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
     LOGGER.info("Going online to retrieve updated GNSS TLS")
     ncache_objs = 0
     sources = []
-    downsampletimes = list(map(lambda t: dt.fromtimestamp(t),
+    downsampletimes = list(map(lambda t: dt.utcfromtimestamp(t),
                                 np.linspace(time.mktime(np.min(timestamps).timetuple()), 
                                             time.mktime(np.max(timestamps).timetuple()),
                                             max(1,
                                                 int(np.ceil((np.max(timestamps) - 
                                                         np.min(timestamps)).total_seconds() / downsample))))))
     for tt in downsampletimes:
+        print(tt.isoformat())
         nretry = 0
         cat_url = api.catalog_url(lon=observer_lon,
                                   lat=observer_lat,
                                   datestr=tt.isoformat()) + \
-                f"&elevation={filter_elevation}"
+                f"Z&elevation={filter_elevation}"
         cache_file = os.path.join(cache_dir,
                                   sha256(cat_url.encode()).hexdigest())
         if not force_recache:
@@ -1053,10 +1054,10 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
                 if not isinstance(source_json, list):
                     raise RuntimeError("JSON source list should be a list. Please report this as TART API bug")
                 nretry = -1
-            except:
+            except Exception as e:
                 nretry += 1
                 time.sleep(retry_time)
-                LOGGER.warning(f"\tRetry '{cat_url}'")
+                LOGGER.warning(f"\tRetry {e} '{cat_url}'")
 
         if nretry < 0:
             this_t_sources = source_json
