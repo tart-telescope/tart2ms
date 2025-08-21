@@ -34,6 +34,7 @@ from astropy.constants import R_earth
 from tart.operation import settings
 from tart.imaging.visibility import Visibility
 from tart.imaging import calibration
+from tart.util import utc
 
 from tart_tools import (api_imaging,
                         api_handler)
@@ -56,6 +57,7 @@ import numpy as np
 import astropy.units as u
 
 from datetime import datetime as dt
+from datetime import timezone
 from dask.diagnostics import ProgressBar
 # dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
 dask.config.set(scheduler='processes')  # overwrite default with threaded scheduler
@@ -1015,11 +1017,35 @@ def __print_infodict_keys(dico_info, keys, just=25):
         LOGGER.info(f"\t{reprk}: {val}")
 
 
-def __fetch_sources(timestamps, observer_lat, observer_lon, 
+
+def equally_spaced_datetimes(start_datetime, end_datetime, n):
+    """
+    Generates a list of N equally spaced datetime objects between a start and end datetime.
+
+    Args:
+        start_datetime (datetime.datetime): The starting datetime.
+        end_datetime (datetime.datetime): The ending datetime.
+        n (int): The number of equally spaced datetime objects to generate.
+
+    Returns:
+        list: A list of n datetime objects.
+    """
+    if n <= 1:
+        return [start_datetime]
+
+    time_delta = end_datetime - start_datetime
+    step = time_delta / (n - 1)
+
+    datetime_list = [start_datetime + i * step for i in range(n)]
+
+    return datetime_list
+
+
+def __fetch_sources(timestamps, observer_lat, observer_lon,
                     retry=5, retry_time=1, force_recache=False, 
                     filter_elevation=45.,
                     filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
-                    downsample=10.0):    
+                    downsample=10.0):
     cache_dir = os.path.join(".", ".tartcache")
     if not os.path.exists(cache_dir):
         os.mkdir(cache_dir)
@@ -1027,19 +1053,22 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
     LOGGER.info("Going online to retrieve updated GNSS TLS")
     ncache_objs = 0
     sources = []
-    downsampletimes = list(map(lambda t: dt.utcfromtimestamp(t),
-                                np.linspace(time.mktime(np.min(timestamps).timetuple()), 
-                                            time.mktime(np.max(timestamps).timetuple()),
-                                            max(1,
-                                                int(np.ceil((np.max(timestamps) - 
-                                                        np.min(timestamps)).total_seconds() / downsample))))))
+    # downsampletimes = list(map(lambda t: dt.fromtimestamp(t, timezone.utc),
+    #                             np.linspace(time.mktime(np.min(timestamps).timetuple()),
+    #                                         time.mktime(np.max(timestamps).timetuple()),
+    #                                         max(1,
+    #                                             int(np.ceil((np.max(timestamps) -
+    #                                                     np.min(timestamps)).total_seconds() / downsample))))))
+    #
+    n_ts = int(len(timestamps)/10)
+    downsampletimes = equally_spaced_datetimes(timestamps[0], timestamps[-1], n_ts)
     for tt in downsampletimes:
         print(tt.isoformat())
         nretry = 0
         cat_url = api.catalog_url(lon=observer_lon,
                                   lat=observer_lat,
                                   datestr=tt.isoformat()) + \
-                f"Z&elevation={filter_elevation}"
+                f"&elevation={filter_elevation}"
         cache_file = os.path.join(cache_dir,
                                   sha256(cat_url.encode()).hexdigest())
         if not force_recache:
@@ -1190,7 +1219,9 @@ def ms_from_hdf5(ms_name, h5file, pol2, phase_center_policy, override_telescope_
             phases = h5f['phases'][:]
 
             hdf_timestamps = h5f['timestamp']
-            timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
+
+            # timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
+            timestamps = [utc.from_string(x) for x in hdf_timestamps]
 
             hdf_vis = h5f['vis'][:]
             ts_this_h5 = 0
