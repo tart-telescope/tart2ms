@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tart2ms"
-version = '0.7.2'
+version = '0.7.3'
 description = "Convert TART observation data to Measurement Sets"
 readme = "README.md"
 license = "GPL-3.0-or-later"
