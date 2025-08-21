@@ -1034,7 +1034,6 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
                                                 int(np.ceil((np.max(timestamps) - 
                                                         np.min(timestamps)).total_seconds() / downsample))))))
     for tt in downsampletimes:
-        print(tt.isoformat())
         nretry = 0
         cat_url = api.catalog_url(lon=observer_lon,
                                   lat=observer_lat,
