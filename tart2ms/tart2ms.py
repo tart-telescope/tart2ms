@@ -1017,7 +1017,7 @@ def __print_infodict_keys(dico_info, keys, just=25):
         LOGGER.info(f"\t{reprk}: {val}")
 
 
-
+# Thank you google gemini!
 def equally_spaced_datetimes(start_datetime, end_datetime, n):
     """
     Generates a list of N equally spaced datetime objects between a start and end datetime.
@@ -1060,7 +1060,7 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
     #                                             int(np.ceil((np.max(timestamps) -
     #                                                     np.min(timestamps)).total_seconds() / downsample))))))
     #
-    n_ts = int(len(timestamps)/10)
+    n_ts = int(len(timestamps)/downsample)
     downsampletimes = equally_spaced_datetimes(timestamps[0], timestamps[-1], n_ts)
     for tt in downsampletimes:
         print(tt.isoformat())
