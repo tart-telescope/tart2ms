@@ -92,6 +92,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.7.4 Move to latest codex-africanus, and bring predict back into the main app.
 - 0.7.3 Fix bug in catalogue date downloads. Were done in localtime so could be up to 12 hours off.
 - 0.6.0b4 Correct debug calculation of rayleigh limit in read_ms.
 - 0.6.0b3 If WEIGHT_SPECTRUM is not present, then subsititude ones
