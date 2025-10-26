@@ -1063,7 +1063,6 @@ def __fetch_sources(timestamps, observer_lat, observer_lon,
     n_ts = int(len(timestamps)/downsample)
     downsampletimes = equally_spaced_datetimes(timestamps[0], timestamps[-1], n_ts)
     for tt in downsampletimes:
-        print(tt.isoformat())
         nretry = 0
         cat_url = api.catalog_url(lon=observer_lon,
                                   lat=observer_lat,
