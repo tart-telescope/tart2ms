@@ -1,20 +1,15 @@
-FROM kernsuite/base:5
-ARG DEBIAN_FRONTEND=noninteractive
+FROM python:3.12-slim
 
-RUN docker-apt-install locales \
-    meqtrees \
-    casalite \
-    python3-numpy \
-    python3-astropy \
-    python3-requests \
-    python3-tz \
-    python3-casacore \
-    python3-pip
+# Set working directory
+WORKDIR /app
 
-RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
-    dpkg-reconfigure --frontend=noninteractive locales && \
-    update-locale LANG=en_US.UTF-8
+# Install the tartball module
+RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host files.pythonhosted.org tart2ms
 
-RUN pip3 install tart2ms
+# Set metadata labels
+LABEL org.opencontainers.image.source="https://github.com/tart-telescope/tartball"
+LABEL org.opencontainers.image.description="Prediction code to simulate TART data"
+LABEL org.opencontainers.image.licenses="GPL-3.0"
 
-ENV LANG en_US.UTF-8 
+# Default command
+CMD ["python", "--version"]
