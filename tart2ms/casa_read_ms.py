@@ -16,10 +16,10 @@ from casacore.tables import table
 logger = logging.getLogger("tart2ms")
 
 
-def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0, snapshot=0, pol=0):
+def read_ms(ms_file, num_vis, angular_resolution, ms_column='DATA', channel=0, field_id=0, ddid=0, snapshot=0, pol=0):
     res_arcmin = angular_resolution / 60.0
     ms = table(ms_file, ack=False, readonly=True, lockoptions='auto')
-    logger.info(f"CASA read ms {ms_file}")
+    logger.info(f"CASA read ms {ms_file} column: {ms_column}")
 
     channel = np.array(channel)
     logger.info(f"Reading channel {channel}")
@@ -33,7 +33,7 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
 
     # Now use TAQL to select only good data from the correct field
     subt = ms.query(f"FIELD_ID=={field_id}",
-                    sortlist="ARRAY_ID", columns="TIME, DATA, UVW, ANTENNA1, ANTENNA2, FLAG")
+                    sortlist="ARRAY_ID", columns=f"TIME, {ms_column}, UVW, ANTENNA1, ANTENNA2, FLAG")
 
     fields = table(subt.getkeyword("FIELD"), ack=False)
     # field columns ['DELAY_DIR', 'PHASE_DIR', 'REFERENCE_DIR', 'CODE', 'FLAG_ROW', 'NAME', 'NUM_POLY', 'SOURCE_ID', 'TIME']
@@ -66,7 +66,7 @@ def read_ms(ms_file, num_vis, angular_resolution, channel=0, field_id=0, ddid=0,
     logger.debug(f"flags = {flags.shape}")
     logger.debug(f"channel = {channel}")
 
-    raw_vis = subt.getcol("DATA")
+    raw_vis = subt.getcol(ms_column)
     logger.debug(f"raw_vis {raw_vis.shape}")
     raw_vis = raw_vis[snapshot_indices, :, pol][:, channel]
     logger.debug(f"raw_vis {raw_vis.shape}")
