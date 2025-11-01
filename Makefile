@@ -13,14 +13,14 @@ develop:
 test:
 	python3 -m pytest
 
-	
+
 lint:
 	flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
 clean:	${MS}
 	${WSCLEAN} ${MS}
 
-HDF='./test_data/vis_2021-03-25_20_50_23.568474.hdf'
+HDF='./test_data/vis_2025-11-01_09_29_31.140425.hdf'
 h5:
 	rm -rf ${MS}
 	tart2ms --hdf ${HDF} --ms ${MS}  --rephase "obs-midpoint" --single-field
@@ -29,7 +29,7 @@ h5:
 JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
 testms:
 	rm -rf ${MS}
-	tart2ms --json ${JSON} --ms ${MS} 
+	tart2ms --json ${JSON} --ms ${MS}
 
 disko:
 	disko --ms ${MS} --healpix --fov 170deg --res 1deg --SVG --lasso --alpha 0.01
