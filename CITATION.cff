@@ -4,6 +4,9 @@ authors:
 - family-names: "Molteno"
   given-names: "Timothy C.A."
   orcid: "https://orcid.org/0000-0002-2022-0380"
+- family-names: "Hugo"
+  given-names: "Benjamin A."
+  orcid: "https://orcid.org/0000-0002-2933-9134"
 title: "TART2MS: tool to create measurement sets from TART data"
 version: 0.8.0 
 date-released: 2025-11-2
