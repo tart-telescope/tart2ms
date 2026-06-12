@@ -92,6 +92,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.8.1 Performance optimizations for rephase-obs-midpoint: move dask `.compute()` calls out of UVW subfield loop, use numpy broadcasting instead of explicit array copies in `rephase()`. Fix daskms/Dataset infinite recursion with dunder-attr patch for dask 2024+ compatibility. Change default dask chunk size from 10000 to 100000 (now a module-level `DEFAULT_CHUNK_SIZE` constant).
 - 0.8.0 Add a column name to the casa_read_ms function.
 - 0.7.4 Move to latest codex-africanus, and bring predict back into the main app.
 - 0.7.3 Fix bug in catalogue date downloads. Were done in localtime so could be up to 12 hours off.
