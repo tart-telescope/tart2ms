@@ -50,6 +50,8 @@ from .ms_helper import (
 from .util import rayleigh_criterion, read_known_phasings
 
 DEFAULT_CHUNK_SIZE = 100000
+DEFAULT_SIGMA = 1.0
+DEFAULT_WEIGHT = 1.0
 
 # Workaround for daskms >=0.2.32 + dask >=2024.x compatibility:
 # Dataset.__getattr__ can infinite-recurse when dask scheduler introspects the object
@@ -1196,13 +1198,13 @@ def ms_create(
             "WEIGHT": (
                 ("row", "corr"),
                 da.from_array(
-                    0.95 * np.ones((row, corr)), chunks=(chunks["row"], corr)
+                    DEFAULT_WEIGHT * np.ones((row, corr)), chunks=(chunks["row"], corr)
                 ),
             ),
             "WEIGHT_SPECTRUM": (
                 dims,
                 da.from_array(
-                    0.95 * np.ones_like(np_data, dtype=np.float64),
+                    DEFAULT_WEIGHT * np.ones_like(np_data, dtype=np.float64),
                     chunks=(chunks["row"], chan, corr),
                 ),
             ),
@@ -1210,14 +1212,14 @@ def ms_create(
             "SIGMA_SPECTRUM": (
                 dims,
                 da.from_array(
-                    np.ones_like(np_data, dtype=np.float64) * 0.05,
+                    DEFAULT_SIGMA * np.ones_like(np_data, dtype=np.float64),
                     chunks=(chunks["row"], chan, corr),
                 ),
             ),
             "SIGMA": (
                 ("row", "corr"),
                 da.from_array(
-                    0.05 * np.ones((row, corr)), chunks=(chunks["row"], corr)
+                    DEFAULT_SIGMA * np.ones((row, corr)), chunks=(chunks["row"], corr)
                 ),
             ),
             "UVW": (
