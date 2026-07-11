@@ -97,14 +97,13 @@ def dense2sparse_uvw(a1, a2, time, ddid, padded_uvw, ack=True):
     unique_time = np.unique(time)
     new_uvw = np.zeros((a1.size, 3), dtype=padded_uvw.dtype)
     outbl = baseline_index(a1, a2, na)
-    if ack:
-        p = progress("Copying UVW to dataset", max=a1.size)
-    for outrow in range(a1.size):
-        if ack:
-            p.next()
-        lookupt = np.argwhere(unique_time == time[outrow])
-        # note: uvw same for all ddid (in m)
-        new_uvw[outrow][:] = padded_uvw[lookupt * nbl + outbl[outrow], :]
+
+    # Vectorized lookup: map each time value to its index in unique_time,
+    # then compute flat indices into the dense padded_uvw array.
+    time_to_idx = {t: i for i, t in enumerate(unique_time)}
+    time_indices = np.array([time_to_idx[t] for t in time], dtype=int)
+    flat_idx = time_indices * nbl + outbl
+    new_uvw[:] = padded_uvw[flat_idx, :]
 
     return new_uvw
 

@@ -11,7 +11,7 @@ import numpy as np
 from pyrap.measures import measures
 from pyrap.quanta import quantity
 
-from tart2ms.fixvis import synthesize_uvw
+from tart2ms.fixvis import baseline_index, dense2sparse_uvw, synthesize_uvw
 
 logger = logging.getLogger("tart2ms")
 logger.addHandler(logging.NullHandler())
@@ -281,6 +281,112 @@ class TestSynthesizeUVW(unittest.TestCase):
 
         max_diff = np.max(np.abs(result_opt["UVW"] - result_orig["UVW"]))
         self.assertLess(max_diff, 1e-12)
+
+
+class TestDense2SparseUVW(unittest.TestCase):
+    """Test that the vectorized dense2sparse_uvw matches the original."""
+
+    def _dense2sparse_original(self, a1, a2, time, ddid, padded_uvw):
+        """Original per-row loop for comparison."""
+        assert time.size == a1.size
+        assert a1.size == a2.size
+        ants = np.concatenate((a1, a2))
+        unique_ants = np.arange(np.max(ants) + 1)
+        na = unique_ants.size
+        nbl = na * (na - 1) // 2 + na
+        unique_time = np.unique(time)
+        new_uvw = np.zeros((a1.size, 3), dtype=padded_uvw.dtype)
+        outbl = baseline_index(a1, a2, na)
+        for outrow in range(a1.size):
+            lookupt = np.argwhere(unique_time == time[outrow])
+            new_uvw[outrow][:] = padded_uvw[lookupt * nbl + outbl[outrow], :]
+        return new_uvw
+
+    def test_matches_original(self):
+        """Vectorized version must match per-row loop exactly."""
+        np.random.seed(123)
+        na = 8
+        nbl = na * (na - 1) // 2 + na
+        ntime = 10
+
+        padded_uvw = np.arange(ntime * nbl * 3, dtype=np.float64).reshape(ntime * nbl, 3)
+        padded_uvw += np.random.randn(ntime * nbl, 3) * 0.01
+
+        unique_time = np.linspace(5071671511.0, 5071672000.0, ntime)
+        nrows = ntime * (nbl - 3)
+        time = np.repeat(unique_time, nbl - 3)
+        # Build a1/a2 for all baselines except the last 3
+        tris = np.stack(np.triu_indices(na, 0), axis=1)
+        a1 = np.tile(tris[:-3, 0], ntime)
+        a2 = np.tile(tris[:-3, 1], ntime)
+        ddid = np.zeros(nrows, dtype=int)
+
+        result_opt = dense2sparse_uvw(a1, a2, time, ddid, padded_uvw)
+        result_orig = self._dense2sparse_original(a1, a2, time, ddid, padded_uvw)
+
+        np.testing.assert_array_equal(result_opt, result_orig)
+
+    def test_full_baseline_set(self):
+        """Test with all baselines present."""
+        np.random.seed(456)
+        na = 6
+        nbl = na * (na - 1) // 2 + na
+        ntime = 5
+
+        padded_uvw = np.random.randn(ntime * nbl, 3).astype(np.float64)
+
+        tris = np.stack(np.triu_indices(na, 0), axis=1)
+        unique_time = np.linspace(5071671511.0, 5071671800.0, ntime)
+        time = np.repeat(unique_time, nbl)
+        a1 = np.tile(tris[:, 0], ntime)
+        a2 = np.tile(tris[:, 1], ntime)
+        ddid = np.zeros(ntime * nbl, dtype=int)
+
+        result_opt = dense2sparse_uvw(a1, a2, time, ddid, padded_uvw)
+        result_orig = self._dense2sparse_original(a1, a2, time, ddid, padded_uvw)
+
+        np.testing.assert_array_equal(result_opt, result_orig)
+        np.testing.assert_array_equal(result_opt, padded_uvw)
+
+    def test_single_baseline(self):
+        """Test with single baseline across many timestamps."""
+        na = 4
+        nbl = na * (na - 1) // 2 + na
+        ntime = 100
+
+        padded_uvw = np.random.randn(ntime * nbl, 3).astype(np.float64)
+
+        unique_time = np.linspace(5071671511.0, 5071673000.0, ntime)
+        time = unique_time.copy()
+        a1 = np.zeros(ntime, dtype=int)
+        a2 = np.ones(ntime, dtype=int)
+        ddid = np.zeros(ntime, dtype=int)
+
+        result_opt = dense2sparse_uvw(a1, a2, time, ddid, padded_uvw)
+        result_orig = self._dense2sparse_original(a1, a2, time, ddid, padded_uvw)
+
+        np.testing.assert_array_equal(result_opt, result_orig)
+
+    def test_large_realistic(self):
+        """Test with realistic TART-scale: 24 ants, 100 timestamps."""
+        na = 24
+        nbl = na * (na - 1) // 2 + na
+        ntime = 100
+
+        np.random.seed(789)
+        padded_uvw = np.random.randn(ntime * nbl, 3).astype(np.float64)
+
+        tris = np.stack(np.triu_indices(na, 0), axis=1)
+        unique_time = np.linspace(5071671511.0, 5071672000.0, ntime)
+        time = np.repeat(unique_time, nbl)
+        a1 = np.tile(tris[:, 0], ntime)
+        a2 = np.tile(tris[:, 1], ntime)
+        ddid = np.zeros(ntime * nbl, dtype=int)
+
+        result_opt = dense2sparse_uvw(a1, a2, time, ddid, padded_uvw)
+        result_orig = self._dense2sparse_original(a1, a2, time, ddid, padded_uvw)
+
+        np.testing.assert_array_equal(result_opt, result_orig)
 
 
 if __name__ == "__main__":
