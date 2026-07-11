@@ -92,6 +92,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.9.0 Major performance overhaul: vectorize `synthesize_uvw` inner antenna loop (~24× fewer casacore calls), vectorize `dense2sparse_uvw` per-row loop (~53× speedup), hoist `.compute()` out of `predict_model` timestamp loop, avoid per-source dask arrays in SOURCE table. Integrate `tart-catalogue-client` for single-TLE-fetch GNSS source catalogs using `celestial_positions` for direct RA/Dec (skipping azel2radec roundtrip). Increase default chunk size to 100,000 (`DEFAULT_CHUNK_SIZE`). Fix daskms Dataset infinite recursion with dunder-attr patch. Set astropy IERS `auto_max_age=None`.
 - 0.8.1 Performance optimizations for rephase-obs-midpoint: move dask `.compute()` calls out of UVW subfield loop, use numpy broadcasting instead of explicit array copies in `rephase()`. Fix daskms/Dataset infinite recursion with dunder-attr patch for dask 2024+ compatibility. Change default dask chunk size from 10000 to 100000 (now a module-level `DEFAULT_CHUNK_SIZE` constant).
 - 0.8.0 Add a column name to the casa_read_ms function.
 - 0.7.4 Move to latest codex-africanus, and bring predict back into the main app.

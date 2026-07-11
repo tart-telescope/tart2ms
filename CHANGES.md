@@ -1,8 +1,8 @@
 # Changes
 
-## Unreleased (post v0.8.1)
+## v0.9.0 — Performance overhaul
 
-### Performance optimizations for `--rephase obs-midpoint`
+### Performance optimizations
 
 #### `synthesize_uvw`: vectorize per-antenna inner loop (commit `57c7c47`)
 
@@ -45,6 +45,26 @@
 **Fix**: Collect values into plain Python lists during iteration, convert to contiguous numpy arrays once at the end, then wrap each column in a single `da.from_array()` call.
 
 **Testing**: 4 new tests in `tart2ms/tests/test_source_table.py` (`TestSourceTable`) verify identical NUM_LINES, NAME, TIME, and DIRECTION output against the old per-source dask approach, plus shape consistency and column dimensionality checks.
+
+---
+
+### GNSS source catalog: integrate tart-catalogue-client
+
+#### `celestial_positions` for direct RA/Dec (commits `e41070a`, `877c741`, `a1b4e25`)
+
+**Problem**: The legacy per-timestamp REST API made N HTTP requests for N timestamps. Downloaded Az/El positions, then `predict_model` converted them back to J2000 RA/Dec via `azel2radec()` — a wasteful roundtrip.
+
+**Fix**: `tart-catalogue-client` downloads TLE ephemerides once, caches on disk (12-hour TTL), and propagates SGP4 locally for any timestamp. `celestial_positions()` returns J2000 RA/Dec directly, skipping the Az/El roundtrip. `predict_model` detects `ra`/`dec` keys and uses them directly, falling back to `azel2radec` for legacy sources. Legacy REST API path removed entirely.
+
+**Testing**: 5 tests in `tart2ms/tests/test_fetch_sources.py` verify client path output, elevation/name filtering, RA/Dec range validation, and end-to-end integration.
+
+---
+
+### Bug fixes
+
+- **IERS auto_max_age** (`1a47b59`): Astropy coordinate transforms fail when IERS tables are >30 days old. Set `iers.conf.auto_max_age = None` at module level. Also fixed in `tart-catalogue-client` v0.5.1.
+
+- **SOURCE table DIRECTION shape** (`1a47b59`): Guard against empty source lists producing 1D `(0,)` arrays instead of required 2D `(0, 2)`. Use `max(n_src, 1)` for chunk sizes to avoid zero-sized dask chunks.
 
 ---
 
