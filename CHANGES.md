@@ -28,6 +28,26 @@
 
 ---
 
+#### `predict_model`: hoist `.compute()` and `np.array()` out of per-timestamp loop (commit `36970df`)
+
+**Problem**: `map_row_to_zendir.compute()` and `np.array(epoch_s_sources)` were called inside the per-timestamp loop. Since `predict_model` can be invoked up to 3 times (GNSS + celestial + solar catalogs), this meant up to 3N redundant dask `.compute()` and numpy array constructions for N timestamps.
+
+**Fix**: Pre-compute both values once before the loop: `map_row_to_zendir_np = map_row_to_zendir.compute()` and `epoch_s_sources_arr = np.array(epoch_s_sources)`. Reuse inside the loop.
+
+**Testing**: 3 new tests in `tart2ms/tests/test_predict_model.py` (`TestPredictModel`) verify identical output against a reference implementation that keeps the original per-iteration behavior, across single timestamp, multi-timestamp with shared catalog epoch, and multi-timestamp scenarios.
+
+---
+
+#### SOURCE table: avoid per-source dask arrays (commit `fe3647e`)
+
+**Problem**: Each GNSS source created its own single-element dask array (`da.asarray(np.asarray([1]))`), and `da.concatenate()` joined hundreds of them into a deep dask graph. This added unnecessary graph complexity and serialization overhead during `dask.compute()`.
+
+**Fix**: Collect values into plain Python lists during iteration, convert to contiguous numpy arrays once at the end, then wrap each column in a single `da.from_array()` call.
+
+**Testing**: 4 new tests in `tart2ms/tests/test_source_table.py` (`TestSourceTable`) verify identical NUM_LINES, NAME, TIME, and DIRECTION output against the old per-source dask approach, plus shape consistency and column dimensionality checks.
+
+---
+
 ### v0.8.1 — Performance optimizations and daskms compatibility fix
 
 **Bugs fixed**:
