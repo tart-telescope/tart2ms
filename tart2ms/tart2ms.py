@@ -577,28 +577,39 @@ def ms_create(
                 LOGGER.debug(
                     f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}"
                 )
-                # , 1, dtype=np.int32)
-                dask_num_lines = da.asarray(np.asarray([1], dtype=np.int32))
-                dask_direction = da.asarray(
-                    np.asarray(direction_src, dtype=np.float64), chunks=1
-                )[None, :]
-                dask_name = da.asarray(np.asarray([name], dtype=object), chunks=1)
-                dask_time = da.asarray(np.asarray([epoch_s_i], dtype=object), chunks=1)
-                all_numlines.append(dask_num_lines)
-                all_name.append(dask_name)
-                all_time.append(dask_time)
-                all_direction.append(dask_direction)
+                all_numlines.append(1)
+                all_name.append(name)
+                all_time.append(epoch_s_i)
+                all_direction.append(direction_src)
+
+        # Build contiguous numpy arrays, then wrap in dask once.
+        # Avoids creating deep dask graphs of single-element arrays.
+        n_src = len(all_numlines)
         dataset = Dataset(
             {
                 "NUM_LINES": (
                     ("row",),
-                    da.concatenate(all_numlines, axis=0).rechunk(-1),
+                    da.from_array(
+                        np.array(all_numlines, dtype=np.int32), chunks=n_src
+                    ),
                 ),
-                "NAME": (("row",), da.concatenate(all_name, axis=0).rechunk(-1)),
-                "TIME": (("row",), da.concatenate(all_time, axis=0).rechunk(-1)),
+                "NAME": (
+                    ("row",),
+                    da.from_array(
+                        np.array(all_name, dtype=object), chunks=n_src
+                    ),
+                ),
+                "TIME": (
+                    ("row",),
+                    da.from_array(
+                        np.array(all_time, dtype=object), chunks=n_src
+                    ),
+                ),
                 "DIRECTION": (
                     ("row", "dir"),
-                    da.concatenate(all_direction, axis=0).rechunk(-1),
+                    da.from_array(
+                        np.array(all_direction, dtype=np.float64), chunks=n_src
+                    ),
                 ),
             }
         )
