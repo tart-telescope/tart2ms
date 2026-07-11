@@ -23,9 +23,11 @@ except ImportError:
     AFRICANUS_DFT_AVAIL = False
 
 TEST_H5 = './test_data/vis_2021-03-25_20_50_23.568474.hdf'
+TEST_H5_REPHASE = './test_data/vis_2026-06-12_04_25_46.149086.hdf'
 TEST_JSON = 'tart2ms/tests/data_test.json'
 TMP_MS = os.path.join(tempfile.gettempdir(), 'test.ms')
 TEST_MS = 'test.ms'
+REPHASE_MS = 'test_rephase.ms'
 
 logger = logging.getLogger("tart2ms")
 # Add a null handler so logs can go somewhere
@@ -110,6 +112,34 @@ class TestTart2MS(unittest.TestCase):
                      fetch_sources=False)
 
         self.assertTrue(True)
+
+    def test_rephase_obs_midpoint_e2e(self):
+        """End-to-end test: rephase-obs-midpoint with a real HDF5 file."""
+        shutil.rmtree(REPHASE_MS, ignore_errors=True)
+        ms_from_hdf5(
+            ms_name=REPHASE_MS,
+            h5file=TEST_H5_REPHASE,
+            pol2=False,
+            phase_center_policy='rephase-obs-midpoint',
+            override_telescope_name='TART',
+            fetch_sources=False,
+        )
+        self.assertTrue(os.path.isdir(REPHASE_MS))
+        # Verify the MS has expected structure
+        from casacore.tables import table
+        with table(REPHASE_MS, ack=False) as t:
+            nrows = t.nrows()
+            colnames = t.colnames()
+        self.assertGreater(nrows, 0, "MS should have at least one row")
+        self.assertIn("DATA", colnames)
+        self.assertIn("UVW", colnames)
+        self.assertIn("ANTENNA1", colnames)
+        self.assertIn("ANTENNA2", colnames)
+        # Single field means all rows should have FIELD_ID = 0
+        with table(REPHASE_MS, ack=False) as t:
+            field_ids = t.getcol("FIELD_ID")
+            self.assertTrue(np.all(field_ids == 0),
+                            f"All FIELD_ID should be 0, got {np.unique(field_ids)}")
 
     def test_model_predict(self, test_ms="test_json_with_model.ms"):
         if AFRICANUS_DFT_AVAIL:
