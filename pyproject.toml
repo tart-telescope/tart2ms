@@ -36,7 +36,8 @@ dependencies = [
     "progress (>=1.6.1,<2.0.0)",
     "python-casacore (>=3.7.1,<4.0.0)",
     "scipy (>=1.16.1,<2.0.0)",
-    "codex-africanus (>=0.4.2,<0.5)"
+    "codex-africanus (>=0.4.2,<0.5)",
+    "tart-catalogue-client (>=0.4.1,<0.5)"
 ]
 
 # [project.optional-dependencies]

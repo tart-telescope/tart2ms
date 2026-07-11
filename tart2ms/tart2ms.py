@@ -67,6 +67,12 @@ def _safe_getattr(self, name):
 
 Dataset.__getattr__ = _safe_getattr
 
+CATALOGUE_CLIENT_AVAIL = True
+try:
+    from tart_client import CatalogueClient
+except ImportError:
+    CATALOGUE_CLIENT_AVAIL = False
+
 # dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
 dask.config.set(scheduler="processes")  # overwrite default with threaded scheduler
 # dask.config.set(scheduler='synchronous')  # overwrite default with threaded scheduler
@@ -1371,17 +1377,57 @@ def equally_spaced_datetimes(start_datetime, end_datetime, n):
     return datetime_list
 
 
-def __fetch_sources(
-    timestamps,
-    observer_lat,
-    observer_lon,
-    retry=5,
-    retry_time=1,
-    force_recache=False,
-    filter_elevation=45.0,
-    filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
-    downsample=10.0,
+def __fetch_sources_via_client(
+    downsampletimes, observer_lat, observer_lon,
+    filter_elevation, filter_name,
 ):
+    """Fetch GNSS sources using tart-catalogue-client.
+
+    Downloads TLE ephemerides once from the catalogue server, then uses
+    local SGP4 propagation to compute positions at each requested timestamp.
+    This replaces N HTTP requests (one per timestamp) with 1 request.
+    """
+    client = CatalogueClient()
+    alt = getattr(observer_lat, "alt", 0.0)  # observer_lat may carry altitude
+    sources = []
+    for tt in downsampletimes:
+        sats = client.horizontal_positions(
+            lat=observer_lat, lon=observer_lon, alt=alt, dt=tt
+        )
+        # Map to the format expected by predict_model / ms_create:
+        # {'name': str, 'az': float, 'el': float, 'jy': float}
+        mapped = []
+        for s in sats:
+            mapped.append({
+                "name": s["name"],
+                "az": s["azimuth_deg"],
+                "el": s["elevation_deg"],
+                "jy": s.get("jy", 0.0),
+            })
+        # Apply same filtering as the legacy path
+        filtered = list(
+            filter(
+                lambda s: (
+                    s.get("el", -90) >= filter_elevation
+                    and re.findall(filter_name, s.get("name", "NULLPTR"))
+                ),
+                mapped,
+            )
+        )
+        sources.append(filtered)
+
+    LOGGER.info(
+        f"GNSS source catalogs retrieved for {len(downsampletimes)} timestamps"
+        f" via tart-catalogue-client (single TLE fetch + local SGP4)"
+    )
+    return sources, downsampletimes
+
+
+def __fetch_sources_legacy(
+    timestamps, downsampletimes, observer_lat, observer_lon,
+    retry, retry_time, force_recache, filter_elevation, filter_name,
+):
+    """Legacy per-timestamp REST API source fetching."""
     cache_dir = os.path.join(".", ".tartcache")
     if not os.path.exists(cache_dir):
         os.mkdir(cache_dir)
@@ -1389,15 +1435,7 @@ def __fetch_sources(
     LOGGER.info("Going online to retrieve updated GNSS TLS")
     ncache_objs = 0
     sources = []
-    # downsampletimes = list(map(lambda t: dt.fromtimestamp(t, timezone.utc),
-    #                             np.linspace(time.mktime(np.min(timestamps).timetuple()),
-    #                                         time.mktime(np.max(timestamps).timetuple()),
-    #                                         max(1,
-    #                                             int(np.ceil((np.max(timestamps) -
-    #                                                     np.min(timestamps)).total_seconds() / downsample))))))
-    #
-    n_ts = int(len(timestamps) / downsample)
-    downsampletimes = equally_spaced_datetimes(timestamps[0], timestamps[-1], n_ts)
+
     for tt in downsampletimes:
         nretry = 0
         cat_url = (
@@ -1449,6 +1487,44 @@ def __fetch_sources(
         f"GNSS source catalogs retrieved for {len(downsampletimes)} timestamps, {ncache_objs} from local cache"
     )
     return sources, downsampletimes
+
+
+def __fetch_sources(
+    timestamps,
+    observer_lat,
+    observer_lon,
+    retry=5,
+    retry_time=1,
+    force_recache=False,
+    filter_elevation=45.0,
+    filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
+    downsample=10.0,
+):
+    """Fetch GNSS source catalogs for the given timestamps.
+
+    Uses tart-catalogue-client when available (single HTTP request + local
+    SGP4 propagation for all timestamps). Falls back to the legacy per-timestamp
+    REST API otherwise.
+    """
+    n_ts = int(len(timestamps) / downsample)
+    downsampletimes = equally_spaced_datetimes(timestamps[0], timestamps[-1], n_ts)
+
+    if CATALOGUE_CLIENT_AVAIL:
+        try:
+            return __fetch_sources_via_client(
+                downsampletimes, observer_lat, observer_lon,
+                filter_elevation, filter_name,
+            )
+        except Exception as e:
+            LOGGER.warning(
+                f"tart-catalogue-client failed ({e}), falling back to legacy API"
+            )
+
+    # Legacy path: per-timestamp REST API requests
+    return __fetch_sources_legacy(
+        timestamps, downsampletimes, observer_lat, observer_lon,
+        retry, retry_time, force_recache, filter_elevation, filter_name,
+    )
 
 
 def __load_ext_ant_pos(fn, ack=True):
