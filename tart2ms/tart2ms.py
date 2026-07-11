@@ -68,6 +68,10 @@ Dataset.__getattr__ = _safe_getattr
 
 from tart_client import CatalogueClient
 
+from astropy.utils.iers import conf as iers_conf
+# Allow interpolation beyond 30-day IERS table validity
+iers_conf.auto_max_age = None
+
 # dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
 dask.config.set(scheduler="processes")  # overwrite default with threaded scheduler
 # dask.config.set(scheduler='synchronous')  # overwrite default with threaded scheduler
@@ -265,8 +269,6 @@ def ms_create(
 
     # Sort out the coordinate frames using astropy
     # https://casa.nrao.edu/casadocs/casa-5.4.1/reference-material/coordinate-frames
-    # iers.conf.iers_auto_url = 'https://astroconda.org/aux/astropy_mirror/iers_a_1/finals2000A.all'
-    # iers.conf.auto_max_age = None
 
     location = EarthLocation.from_geodetic(
         lon=loc["lon"] * u.deg,
@@ -586,30 +588,36 @@ def ms_create(
         # Build contiguous numpy arrays, then wrap in dask once.
         # Avoids creating deep dask graphs of single-element arrays.
         n_src = len(all_numlines)
+        if n_src > 0:
+            direction_arr = np.array(all_direction, dtype=np.float64)
+            if direction_arr.ndim == 1:
+                direction_arr = direction_arr.reshape(-1, 2)
+        else:
+            direction_arr = np.empty((0, 2), dtype=np.float64)
         dataset = Dataset(
             {
                 "NUM_LINES": (
                     ("row",),
                     da.from_array(
-                        np.array(all_numlines, dtype=np.int32), chunks=n_src
+                        np.array(all_numlines, dtype=np.int32), chunks=max(n_src, 1)
                     ),
                 ),
                 "NAME": (
                     ("row",),
                     da.from_array(
-                        np.array(all_name, dtype=object), chunks=n_src
+                        np.array(all_name, dtype=object), chunks=max(n_src, 1)
                     ),
                 ),
                 "TIME": (
                     ("row",),
                     da.from_array(
-                        np.array(all_time, dtype=object), chunks=n_src
+                        np.array(all_time, dtype=object), chunks=max(n_src, 1)
                     ),
                 ),
                 "DIRECTION": (
                     ("row", "dir"),
                     da.from_array(
-                        np.array(all_direction, dtype=np.float64), chunks=n_src
+                        direction_arr, chunks=max(n_src, 1)
                     ),
                 ),
             }
