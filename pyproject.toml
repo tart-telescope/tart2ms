@@ -37,7 +37,7 @@ dependencies = [
     "python-casacore (>=3.7.1,<4.0.0)",
     "scipy (>=1.16.1,<2.0.0)",
     "codex-africanus (>=0.4.2,<0.5)",
-    "tart-catalogue-client (>=0.4.1,<0.5)"
+    "tart-catalogue-client (>=0.5.0,<0.6)"
 ]
 
 # [project.optional-dependencies]
