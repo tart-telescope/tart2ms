@@ -172,9 +172,14 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                 "If sources are specified then we expected epochs to be of same size as sources list")
         model_data = da.zeros(dask_data_shape, chunks=dask_data_chunking, dtype=dask_data_dtype)
         spwi_chan_freqs = da.from_array(spw_chan_freqs[spw_i])
+
+        # Pre-compute values to avoid repeated operations inside the timestamp loop
+        epoch_s_sources_arr = np.array(epoch_s_sources)
+        map_row_to_zendir_np = map_row_to_zendir.compute()
+
         for dataset_i, data_epoch_i in enumerate(epoch_s):
             # predict closest matching source catalog epoch
-            nn_source_epoch = np.argmin(abs(np.array(epoch_s_sources) - data_epoch_i))
+            nn_source_epoch = np.argmin(abs(epoch_s_sources_arr - data_epoch_i))
             epoch_s_i = epoch_s_sources[nn_source_epoch]
             if sources[nn_source_epoch] is None:
                 logger.critical("You have requested to predict a model for catalog sources, however one or more of "
@@ -216,7 +221,7 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
             spi = np.zeros((len(sources_i), 1)) # flat spectrum
             reffreq = np.ones(len(sources_i)) * np.mean(spw_chan_freqs[spw_i])
             logspi = np.ones(len(sources_i), dtype=bool)
-            sel = map_row_to_zendir.compute() == dataset_i            
+            sel = map_row_to_zendir_np == dataset_i            
             vis = wsclean_predict(uvw_data[sel, :],
                                     lm,
                                     source_type,
