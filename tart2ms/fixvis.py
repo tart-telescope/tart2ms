@@ -177,29 +177,36 @@ def synthesize_uvw(
         quantity(station_ECEF[0, 2], posunits[2]),
     )
 
-    # setup local horizon coordinate frame with antenna 0 as reference position
+    # Pre-build vectorized baseline: all antennas paired with reference (antenna 0).
+    # The ITRF offset vectors are static; call to_uvw once per timestamp (not per antenna).
     dm.do_frame(obs)
     dm.do_frame(refdir)
     dm.do_frame(epoch)
+
+    ref_pos = station_ECEF[0]
+    x_pairs = np.column_stack([station_ECEF[:, 0], np.full(na, ref_pos[0])]).ravel()
+    y_pairs = np.column_stack([station_ECEF[:, 1], np.full(na, ref_pos[1])]).ravel()
+    z_pairs = np.column_stack([station_ECEF[:, 2], np.full(na, ref_pos[2])]).ravel()
+
+    baseline_measure = dm.baseline(
+        posframe,
+        quantity(x_pairs, posunits[0]),
+        quantity(y_pairs, posunits[1]),
+        quantity(z_pairs, posunits[2]),
+    )
+
     if ack:
         p = progress("Calculating UVW", max=unique_time.size)
     for ti, t in enumerate(unique_time):
         if ack:
             p.next()
-        epoch = dm.epoch(time_TZ, quantity(t, "s"))
-        dm.do_frame(epoch)
+        dm.do_frame(dm.epoch(time_TZ, quantity(t, time_unit)))
 
-        station_uv = np.zeros_like(station_ECEF)
-        for iapos, apos in enumerate(station_ECEF):
-            compuvw = dm.to_uvw(
-                dm.baseline(
-                    posframe,
-                    quantity([apos[0], station_ECEF[0, 0]], posunits[0]),
-                    quantity([apos[1], station_ECEF[0, 1]], posunits[1]),
-                    quantity([apos[2], station_ECEF[0, 2]], posunits[2]),
-                )
-            )
-            station_uv[iapos] = compuvw["xyz"].get_value()[0:3]
+        # Single vectorized call for all antenna UVW positions
+        result = dm.to_uvw(baseline_measure)
+        xyz_vals = np.array(result["xyz"].get_value()).reshape(na, 6)
+        station_uv = xyz_vals[:, 0:3]
+
         for bl in range(nbl):
             blants = antindices[bl]
             bla1 = blants[0]
