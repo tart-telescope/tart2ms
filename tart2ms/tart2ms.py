@@ -17,7 +17,6 @@ import sys
 import time
 from datetime import datetime as dt
 from datetime import timezone
-from hashlib import sha256
 from itertools import product
 
 import astropy.units as u
@@ -37,7 +36,7 @@ from tart.imaging import calibration
 from tart.imaging.visibility import Visibility
 from tart.operation import settings
 from tart.util import utc
-from tart_tools import api_handler, api_imaging
+from tart_tools import api_imaging
 
 from .catalogs import catalog_reader
 from .fixvis import dense2sparse_uvw, fixms, progress, rephase, synthesize_uvw
@@ -67,11 +66,7 @@ def _safe_getattr(self, name):
 
 Dataset.__getattr__ = _safe_getattr
 
-CATALOGUE_CLIENT_AVAIL = True
-try:
-    from tart_client import CatalogueClient
-except ImportError:
-    CATALOGUE_CLIENT_AVAIL = False
+from tart_client import CatalogueClient
 
 # dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
 dask.config.set(scheduler="processes")  # overwrite default with threaded scheduler
@@ -1423,71 +1418,6 @@ def __fetch_sources_via_client(
     return sources, downsampletimes
 
 
-def __fetch_sources_legacy(
-    timestamps, downsampletimes, observer_lat, observer_lon,
-    retry, retry_time, force_recache, filter_elevation, filter_name,
-):
-    """Legacy per-timestamp REST API source fetching."""
-    cache_dir = os.path.join(".", ".tartcache")
-    if not os.path.exists(cache_dir):
-        os.mkdir(cache_dir)
-    api = api_handler.APIhandler("")
-    LOGGER.info("Going online to retrieve updated GNSS TLS")
-    ncache_objs = 0
-    sources = []
-
-    for tt in downsampletimes:
-        nretry = 0
-        cat_url = (
-            api.catalog_url(lon=observer_lon, lat=observer_lat, datestr=tt.isoformat())
-            + f"&elevation={filter_elevation}"
-        )
-        cache_file = os.path.join(cache_dir, sha256(cat_url.encode()).hexdigest())
-        if not force_recache:
-            if os.path.exists(cache_file):
-                nretry = -1
-                with open(cache_file) as f:
-                    source_json = json.load(f)
-                ncache_objs += 1
-        while nretry < retry and nretry >= 0:
-            try:
-                source_json = api.get_url(cat_url)
-                if not isinstance(source_json, list):
-                    raise RuntimeError(
-                        "JSON source list should be a list. Please report this as TART API bug"
-                    )
-                nretry = -1
-            except Exception as e:
-                nretry += 1
-                time.sleep(retry_time)
-                LOGGER.warning(f"\tRetry {e} '{cat_url}'")
-
-        if nretry < 0:
-            this_t_sources = source_json
-            sources.append(
-                list(
-                    filter(
-                        lambda s: (
-                            s.get("el", -90) >= filter_elevation
-                            and re.findall(filter_name, s.get("name", "NULLPTR"))
-                        ),
-                        this_t_sources,
-                    )
-                )
-            )
-            with open(cache_file, "w+") as f:
-                json.dump(source_json, f)
-        else:
-            LOGGER.critical(
-                f"Failed to retrieve GNSS TLS from '{cat_url}'. "
-                f"Source information will be unavailable and prediction will not return a useful model"
-            )
-            return None, downsampletimes
-    LOGGER.info(
-        f"GNSS source catalogs retrieved for {len(downsampletimes)} timestamps, {ncache_objs} from local cache"
-    )
-    return sources, downsampletimes
-
 
 def __fetch_sources(
     timestamps,
@@ -1502,28 +1432,15 @@ def __fetch_sources(
 ):
     """Fetch GNSS source catalogs for the given timestamps.
 
-    Uses tart-catalogue-client when available (single HTTP request + local
-    SGP4 propagation for all timestamps). Falls back to the legacy per-timestamp
-    REST API otherwise.
+    Uses tart-catalogue-client: single TLE ephemeris fetch + local SGP4
+    propagation for all timestamps.
     """
     n_ts = int(len(timestamps) / downsample)
     downsampletimes = equally_spaced_datetimes(timestamps[0], timestamps[-1], n_ts)
 
-    if CATALOGUE_CLIENT_AVAIL:
-        try:
-            return __fetch_sources_via_client(
-                downsampletimes, observer_lat, observer_lon,
-                filter_elevation, filter_name,
-            )
-        except Exception as e:
-            LOGGER.warning(
-                f"tart-catalogue-client failed ({e}), falling back to legacy API"
-            )
-
-    # Legacy path: per-timestamp REST API requests
-    return __fetch_sources_legacy(
-        timestamps, downsampletimes, observer_lat, observer_lon,
-        retry, retry_time, force_recache, filter_elevation, filter_name,
+    return __fetch_sources_via_client(
+        downsampletimes, observer_lat, observer_lon,
+        filter_elevation, filter_name,
     )
 
 
