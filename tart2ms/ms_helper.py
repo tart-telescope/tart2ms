@@ -202,10 +202,15 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
             names = []
             for src_i, src in enumerate(sources_i):
                 names.append(src['name'].replace(" ", "_").replace("CELESTIAL_", "").replace("SOLAR_", ""))
-                # Convert to J2000
-                direction_src = azel2radec(az=src['az'], el=src['el'], distance=src.get('distance', None), 
-                                           location=location, obstime=sources_obstime[nn_source_epoch])
-                sources_radec[src_i, :] = direction_src
+                # If source already has 'ra'/'dec' in radians (e.g. from tart-catalogue-client
+                # celestial_positions), use them directly. Otherwise convert from az/el.
+                if 'ra' in src and 'dec' in src:
+                    sources_radec[src_i, 0] = src['ra']
+                    sources_radec[src_i, 1] = src['dec']
+                else:
+                    direction_src = azel2radec(az=src['az'], el=src['el'], distance=src.get('distance', None), 
+                                               location=location, obstime=sources_obstime[nn_source_epoch])
+                    sources_radec[src_i, :] = direction_src
             # get lm cosines to sources
             zenith_i = zenith_directions[dataset_i]
             lm = radec_to_lm(sources_radec, zenith_i)
@@ -216,7 +221,15 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                                     axis=-1)
             flux = np.ones(len(sources_i))
             for ssi, ss in enumerate(sources_i):
-                flux[ssi] = ss.get("flux", lambda nu: default_flux)(np.mean(spw_chan_freqs[spw_i]))
+                # Support 'flux' (legacy numeric or callable), 'jy' (client).
+                # Check 'flux' first for backward compatibility.
+                if 'flux' in ss:
+                    f = ss['flux']
+                    flux[ssi] = f(np.mean(spw_chan_freqs[spw_i])) if callable(f) else f
+                elif 'jy' in ss:
+                    flux[ssi] = ss['jy']
+                else:
+                    flux[ssi] = default_flux(np.mean(spw_chan_freqs[spw_i]))
             
             spi = np.zeros((len(sources_i), 1)) # flat spectrum
             reffreq = np.ones(len(sources_i)) * np.mean(spw_chan_freqs[spw_i])

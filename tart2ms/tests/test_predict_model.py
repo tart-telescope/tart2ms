@@ -115,9 +115,13 @@ def _predict_model_original(
         )
         flux = np.ones(len(sources_i))
         for ssi, ss in enumerate(sources_i):
-            flux[ssi] = ss.get("flux", lambda nu: default_flux)(
-                np.mean(spw_chan_freqs[spw_i])
-            )
+            if 'flux' in ss:
+                f = ss['flux']
+                flux[ssi] = f(np.mean(spw_chan_freqs[spw_i])) if callable(f) else f
+            elif 'jy' in ss:
+                flux[ssi] = ss['jy']
+            else:
+                flux[ssi] = default_flux(np.mean(spw_chan_freqs[spw_i]))
 
         spi = np.zeros((len(sources_i), 1))
         reffreq = np.ones(len(sources_i)) * np.mean(spw_chan_freqs[spw_i])

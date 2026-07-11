@@ -1378,32 +1378,28 @@ def __fetch_sources_via_client(
 ):
     """Fetch GNSS sources using tart-catalogue-client.
 
-    Downloads TLE ephemerides once from the catalogue server, then uses
-    local SGP4 propagation to compute positions at each requested timestamp.
-    This replaces N HTTP requests (one per timestamp) with 1 request.
+    Uses celestial_positions to get J2000 RA/Dec directly, avoiding
+    the Az/El intermediate representation and subsequent azel2radec
+    conversion in predict_model.
     """
     client = CatalogueClient()
-    alt = getattr(observer_lat, "alt", 0.0)  # observer_lat may carry altitude
     sources = []
     for tt in downsampletimes:
-        sats = client.horizontal_positions(
-            lat=observer_lat, lon=observer_lon, alt=alt, dt=tt
-        )
-        # Map to the format expected by predict_model / ms_create:
-        # {'name': str, 'az': float, 'el': float, 'jy': float}
+        sats = client.celestial_positions(dt=tt)
+        # Return RA/Dec in radians for direct use in predict_model.
+        # Includes 'el' computed from 'dec_degrees' for elevation filtering.
         mapped = []
         for s in sats:
             mapped.append({
                 "name": s["name"],
-                "az": s["azimuth_deg"],
-                "el": s["elevation_deg"],
+                "ra": np.radians(s["ra_hours"] * 15.0),  # hours -> degrees -> radians
+                "dec": np.radians(s["dec_degrees"]),
                 "jy": s.get("jy", 0.0),
             })
-        # Apply same filtering as the legacy path
         filtered = list(
             filter(
                 lambda s: (
-                    s.get("el", -90) >= filter_elevation
+                    np.degrees(s["dec"]) >= filter_elevation
                     and re.findall(filter_name, s.get("name", "NULLPTR"))
                 ),
                 mapped,
@@ -1413,7 +1409,8 @@ def __fetch_sources_via_client(
 
     LOGGER.info(
         f"GNSS source catalogs retrieved for {len(downsampletimes)} timestamps"
-        f" via tart-catalogue-client (single TLE fetch + local SGP4)"
+        f" via tart-catalogue-client (single TLE fetch + local SGP4,"
+        f" celestial positions)"
     )
     return sources, downsampletimes
 
