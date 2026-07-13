@@ -1621,8 +1621,14 @@ def ms_from_hdf5(
 
             hdf_timestamps = h5f["timestamp"]
 
-            # timestamps = [dateutil.parser.parse(x) for x in hdf_timestamps]
-            timestamps = [utc.from_string(x) for x in hdf_timestamps]
+            # Some HDF5 files store timestamps without timezone info.
+            # Assume UTC if timezone is missing.
+            timestamps = []
+            for x in hdf_timestamps:
+                ts = utc.from_string(x)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                timestamps.append(ts)
 
             hdf_vis = h5f["vis"][:]
             ts_this_h5 = 0
