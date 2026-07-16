@@ -20,16 +20,14 @@ lint:
 clean:	${MS}
 	${WSCLEAN} ${MS}
 
-HDF='./test_data/vis_2025-11-01_09_29_31.140425.hdf'
+HDF='./test_data/vis_2026-06-12_04_25_46.149086.hdf'
 h5:
-	rm -rf ${MS}
-	tart2ms --hdf ${HDF} --ms ${MS}  --rephase "obs-midpoint" --single-field
+	uv run tart2ms --hdf ${HDF} --ms ${MS}  --rephase "obs-midpoint" --single-field --clobber
 # 	wsclean -name test -pol RR -size 1280 1280 -scale 0.0275 -niter 0 ${MS}
 
 JSON='./test_data/data_2019_08_04_21_38_31_UTC.json'
 testms:
-	rm -rf ${MS}
-	tart2ms --json ${JSON} --ms ${MS}
+	uv run tart2ms --json ${JSON} --ms ${MS}
 
 disko:
 	disko --ms ${MS} --healpix --fov 170deg --res 1deg --SVG --lasso --alpha 0.01
