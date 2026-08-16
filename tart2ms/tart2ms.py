@@ -72,9 +72,45 @@ from astropy.utils.iers import conf as iers_conf
 # Allow interpolation beyond 30-day IERS table validity
 iers_conf.auto_max_age = None
 
-# dask.config.set(scheduler='threads')  # overwrite default with threaded scheduler
-dask.config.set(scheduler="processes")  # overwrite default with threaded scheduler
-# dask.config.set(scheduler='synchronous')  # overwrite default with threaded scheduler
+# ---------------------------------------------------------------------------
+# Dask scheduler choice.
+#
+# dask-ms writes and the africanus model-prediction / rephase dask graphs run
+# under whatever local scheduler is configured here. Historically tart2ms
+# hardcoded ``processes`` (the multiprocessing scheduler), which proved to be
+# both the slowest and the most fragile option in testing:
+#
+#   * Measured on the shipped test datasets, ``processes`` was ~4-6x slower
+#     than ``threads`` or ``synchronous`` (dask overhead at typical TART row
+#     counts); ``threads`` and ``synchronous`` finished the same conversion in
+#     a fraction of the time.
+#   * ``processes`` raises ``BrokenProcessPool`` / "start a new process before
+#     the current process has finished bootstrapping" when the entry point is
+#     not wrapped in the ``if __name__ == '__main__'`` + ``freeze_support()``
+#     idiom (see CHANGES.md v0.8.1: the ``Dataset.__getattr__`` dunder-attr
+#     patch exists precisely because the multiprocessing scheduler introspects
+#     objects during pickling).
+#
+# The casacore.measures code in fixvis.py (``synthesize_uvw``/``fixms``) is
+# documented as not thread-safe, but it never runs *through* the dask
+# scheduler - it is invoked in plain Python loops in the main thread - so the
+# dask-level scheduler is free to be threaded or synchronous without touching
+# that code path.
+#
+# We therefore default to ``threads`` (parallel, reliable, and the fastest of
+# the local schedulers on the dask-ms write path) while still allowing the
+# choice to be overridden via the TART2MS_DASK_SCHEDULER environment variable
+# (e.g. ``synchronous`` for debugging or ``processes`` if true multi-process
+# isolation is required).
+# ---------------------------------------------------------------------------
+_VALID_SCHEDULERS = {"threads", "processes", "synchronous"}
+_DASK_SCHEDULER = os.environ.get("TART2MS_DASK_SCHEDULER", "threads").strip().lower()
+if _DASK_SCHEDULER not in _VALID_SCHEDULERS:
+    raise ValueError(
+        f"Invalid TART2MS_DASK_SCHEDULER '{_DASK_SCHEDULER}'. "
+        f"Must be one of {sorted(_VALID_SCHEDULERS)}."
+    )
+dask.config.set(scheduler=_DASK_SCHEDULER)
 
 
 LOGGER = logging.getLogger("tart2ms")

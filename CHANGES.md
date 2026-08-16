@@ -1,5 +1,42 @@
 # Changes
 
+## v0.9.3 — Performance and dask scheduler
+
+### Performance optimizations
+
+- **`synthesize_uvw`: vectorize the per-baseline inner loop** (`fixvis.py`).
+  The loop over every baseline for every timestamp (`station_uv[bla1] - station_uv[bla2]`)
+  was replaced by a single broadcasting assignment over all baselines
+  (`station_uv[antindices[:, 0]] - station_uv[antindices[:, 1]]`). Measured ~50x faster
+  baseline computation with bit-identical output.
+
+- **`dense2sparse_uvw`: vectorize the time-index lookup** (`fixvis.py`). The Python
+  dict + list-comprehension that mapped each timestep to its index was replaced by
+  `np.searchsorted(unique_time, time)` (valid because `unique_time = np.unique(time)`
+  is sorted). Measured ~6x faster with identical indices.
+
+- **`predict_model`: memoize per-source-epoch conversions** (`ms_helper.py`). Source
+  catalogs are sampled more coarsely than the data (via `downsample`), so many data
+  epochs map to the same nearest source epoch. The astropy `azel2radec` conversions,
+  flux evaluation, and RA/Dec setup are now computed once per distinct source epoch and
+  cached, instead of redundantly per data epoch.
+
+### Dask scheduler default
+
+- **The default dask scheduler changed from `processes` to `threads`.** The previous
+  hardcoded `dask.config.set(scheduler="processes")` was both the slowest and the
+  most fragile of the local schedulers in testing (measured ~4-6x slower than
+  `threads`/`synchronous` on the shipped datasets, and it crashes with
+  `BrokenProcessPool` / "start a new process before the current process has
+  finished bootstrapping" when the entry point lacks the
+  `if __name__ == '__main__'` + `freeze_support()` multiprocessing idiom). The
+  scheduler is now configurable through the `TART2MS_DASK_SCHEDULER` environment
+  variable (`threads`, `processes`, or `synchronous`; default `threads`), with an
+  explicit error for invalid values. The casacore.measures code in `fixvis.py`
+  (`synthesize_uvw`/`fixms`) is invoked in plain Python loops in the main thread
+  and never through the dask scheduler, so switching the dask-level scheduler to
+  `threads` does not touch that non-thread-safe code path.
+
 ## v0.9.0 — Performance overhaul
 
 ### Performance optimizations

@@ -814,6 +814,7 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/5d/e7f4a9035cc62e4d10e35f22477498458520cb32b20eed5b4a9e7854d15d/sgp4-2.27-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:63d30826ebd303e66f184b1e3feba30524d01a379e50baacd47732dd447d97ab", size = 214880, upload-time = "2026-07-03T12:54:46.563Z" },
     { url = "https://files.pythonhosted.org/packages/56/62/c14d2aaa36ff6e749189e3576c70f3ed21f3ba72fa69e924f20581e760c1/sgp4-2.27-cp311-abi3-win32.whl", hash = "sha256:951ec95ea7f0fe0b5307fc2cd9d28c8923048bcf376b11c6cd93739e15b4722d", size = 147271, upload-time = "2026-07-03T12:54:47.498Z" },
     { url = "https://files.pythonhosted.org/packages/d5/b5/6e76ddece37a130c1c4c33a0ca2ae381c7aad733ca8e3d9b451594711fc0/sgp4-2.27-cp311-abi3-win_amd64.whl", hash = "sha256:827c63feb60987ad177c2c80f3a927e721ead2f444d6560cd2a4337ca90d2490", size = 148879, upload-time = "2026-07-03T12:54:48.448Z" },
+    { url = "https://files.pythonhosted.org/packages/78/cd/06dc91b31f2b919e788396c2cb5ad313d5ce0754321165343fd585c4be53/sgp4-2.27-py3-none-any.whl", hash = "sha256:5f3f5716649988b638fbe7fcda592830e0956f548ca273b93cfa5f75917b9087", size = 123299, upload-time = "2026-07-12T18:53:05.274Z" },
 ]
 
 [[package]]
@@ -872,7 +873,7 @@ wheels = [
 
 [[package]]
 name = "tart2ms"
-version = "0.8.1"
+version = "0.9.3"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },

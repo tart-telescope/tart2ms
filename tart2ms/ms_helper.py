@@ -177,6 +177,13 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
         epoch_s_sources_arr = np.array(epoch_s_sources)
         map_row_to_zendir_np = map_row_to_zendir.compute()
 
+        # Cache per source-epoch derived quantities. When several data epochs
+        # map to the same nearest source catalog epoch (common, since source
+        # catalogs are sampled more coarsely than the data via 'downsample'),
+        # these conversions (astropy azel2radec, flux evaluation, RA/Dec -> lm)
+        # are performed exactly once instead of once per data epoch.
+        src_epoch_derived = {}
+
         for dataset_i, data_epoch_i in enumerate(epoch_s):
             # predict closest matching source catalog epoch
             nn_source_epoch = np.argmin(abs(epoch_s_sources_arr - data_epoch_i))
@@ -186,55 +193,72 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                                 "the databases you've provided contains no catalog source information. The MODEL_DATA "
                                 "column of your database may be incomplete")
                 continue
-            sources_i = list(filter(lambda s: s.get('el', -90) >= filter_elevation and
-                                              re.findall(filter_name, s.get('name', 'NULLPTR')), 
-                                    sources[nn_source_epoch]))
-            if not sources_i:
-                logger.critical("You have requested to predict a model for catalog sources, however one or more of "
-                                "the databases you've provided contains no catalog source information. The MODEL_DATA "
-                                "column of your database may be incomplete")
+
+            if nn_source_epoch not in src_epoch_derived:
+                sources_i = list(filter(lambda s: s.get('el', -90) >= filter_elevation and
+                                                  re.findall(filter_name, s.get('name', 'NULLPTR')),
+                                        sources[nn_source_epoch]))
+                if not sources_i:
+                    logger.critical("You have requested to predict a model for catalog sources, however one or more of "
+                                    "the databases you've provided contains no catalog source information. The MODEL_DATA "
+                                    "column of your database may be incomplete")
+                    src_epoch_derived[nn_source_epoch] = None
+                    continue
+                # get J2000 RADEC
+                sources_radec = np.empty((len(sources_i), 2))
+                names = []
+                for src_i, src in enumerate(sources_i):
+                    names.append(src['name'].replace(" ", "_").replace("CELESTIAL_", "").replace("SOLAR_", ""))
+                    # If source already has 'ra'/'dec' in radians (e.g. from tart-catalogue-client
+                    # celestial_positions), use them directly. Otherwise convert from az/el.
+                    if 'ra' in src and 'dec' in src:
+                        sources_radec[src_i, 0] = src['ra']
+                        sources_radec[src_i, 1] = src['dec']
+                    else:
+                        direction_src = azel2radec(az=src['az'], el=src['el'], distance=src.get('distance', None),
+                                                   location=location, obstime=sources_obstime[nn_source_epoch])
+                        sources_radec[src_i, :] = direction_src
+                # get lm cosines to sources (depends on per-dataset zenith, so
+                # recomputed in the loop below with the cached sources_radec)
+                source_type = np.array(["POINT"] * len(sources_i))
+                gauss_shape = np.stack(([0.] * len(sources_i), # maj
+                                        [0.] * len(sources_i), # min
+                                        [0.] * len(sources_i)), # BPA
+                                        axis=-1)
+                flux = np.ones(len(sources_i))
+                for ssi, ss in enumerate(sources_i):
+                    # Support 'flux' (legacy numeric or callable), 'jy' (client).
+                    # Check 'flux' first for backward compatibility.
+                    if 'flux' in ss:
+                        f = ss['flux']
+                        flux[ssi] = f(np.mean(spw_chan_freqs[spw_i])) if callable(f) else f
+                    elif 'jy' in ss:
+                        flux[ssi] = ss['jy']
+                    else:
+                        flux[ssi] = default_flux(np.mean(spw_chan_freqs[spw_i]))
+
+                spi = np.zeros((len(sources_i), 1)) # flat spectrum
+                reffreq = np.ones(len(sources_i)) * np.mean(spw_chan_freqs[spw_i])
+                logspi = np.ones(len(sources_i), dtype=bool)
+                src_epoch_derived[nn_source_epoch] = (
+                    sources_i, sources_radec, names, source_type, gauss_shape,
+                    flux, spi, reffreq, logspi,
+                )
+
+            cached = src_epoch_derived[nn_source_epoch]
+            if cached is None:
                 continue
+            (sources_i, sources_radec, names, source_type, gauss_shape,
+             flux, spi, reffreq, logspi) = cached
+
             if abs(epoch_s_i - data_epoch_i) > 60.0:
                 logger.info(f"Predicting model for source catalog epoch {epoch_s_i:.2f} for data epoch "
                             f"{data_epoch_i:.2f} (temporal difference: {abs(epoch_s_i - data_epoch_i):.2f} s)")
-            # get J2000 RADEC
-            sources_radec = np.empty((len(sources_i), 2))
-            names = []
-            for src_i, src in enumerate(sources_i):
-                names.append(src['name'].replace(" ", "_").replace("CELESTIAL_", "").replace("SOLAR_", ""))
-                # If source already has 'ra'/'dec' in radians (e.g. from tart-catalogue-client
-                # celestial_positions), use them directly. Otherwise convert from az/el.
-                if 'ra' in src and 'dec' in src:
-                    sources_radec[src_i, 0] = src['ra']
-                    sources_radec[src_i, 1] = src['dec']
-                else:
-                    direction_src = azel2radec(az=src['az'], el=src['el'], distance=src.get('distance', None), 
-                                               location=location, obstime=sources_obstime[nn_source_epoch])
-                    sources_radec[src_i, :] = direction_src
-            # get lm cosines to sources
+
             zenith_i = zenith_directions[dataset_i]
             lm = radec_to_lm(sources_radec, zenith_i)
-            source_type = np.array(["POINT"] * len(sources_i))
-            gauss_shape = np.stack(([0.] * len(sources_i), # maj
-                                    [0.] * len(sources_i), # min
-                                    [0.] * len(sources_i)), # BPA
-                                    axis=-1)
-            flux = np.ones(len(sources_i))
-            for ssi, ss in enumerate(sources_i):
-                # Support 'flux' (legacy numeric or callable), 'jy' (client).
-                # Check 'flux' first for backward compatibility.
-                if 'flux' in ss:
-                    f = ss['flux']
-                    flux[ssi] = f(np.mean(spw_chan_freqs[spw_i])) if callable(f) else f
-                elif 'jy' in ss:
-                    flux[ssi] = ss['jy']
-                else:
-                    flux[ssi] = default_flux(np.mean(spw_chan_freqs[spw_i]))
-            
-            spi = np.zeros((len(sources_i), 1)) # flat spectrum
-            reffreq = np.ones(len(sources_i)) * np.mean(spw_chan_freqs[spw_i])
-            logspi = np.ones(len(sources_i), dtype=bool)
-            sel = map_row_to_zendir_np == dataset_i            
+
+            sel = map_row_to_zendir_np == dataset_i
             vis = wsclean_predict(uvw_data[sel, :],
                                     lm,
                                     source_type,

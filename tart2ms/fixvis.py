@@ -98,10 +98,11 @@ def dense2sparse_uvw(a1, a2, time, ddid, padded_uvw, ack=True):
     new_uvw = np.zeros((a1.size, 3), dtype=padded_uvw.dtype)
     outbl = baseline_index(a1, a2, na)
 
-    # Vectorized lookup: map each time value to its index in unique_time,
-    # then compute flat indices into the dense padded_uvw array.
-    time_to_idx = {t: i for i, t in enumerate(unique_time)}
-    time_indices = np.array([time_to_idx[t] for t in time], dtype=int)
+    # Vectorized lookup: map each time value to its index in unique_time.
+    # unique_time comes from np.unique (sorted), so searchsorted returns the
+    # exact index for every t present in it. This avoids the Python dict and
+    # list-comprehension loop while producing identical indices.
+    time_indices = np.searchsorted(unique_time, time)
     flat_idx = time_indices * nbl + outbl
     new_uvw[:] = padded_uvw[flat_idx, :]
 
@@ -206,13 +207,14 @@ def synthesize_uvw(
         xyz_vals = np.array(result["xyz"].get_value()).reshape(na, 6)
         station_uv = xyz_vals[:, 0:3]
 
-        for bl in range(nbl):
-            blants = antindices[bl]
-            bla1 = blants[0]
-            bla2 = blants[1]
-            # same as in CASA convention (Convention for UVW calculations
-            # in CASA, Rau 2013)
-            padded_uvw[ti * nbl + bl, :] = station_uv[bla1] - station_uv[bla2]
+        # Vectorized baseline computation. antindices is (nbl, 2) with the
+        # bl-th baseline (a1, a2) -> station_uv[a1] - station_uv[a2].
+        # Same convention as in CASA (Convention for UVW calculations in
+        # CASA, Rau 2013). Broadcasting over all baselines avoids the
+        # per-baseline Python loop and produces identical results.
+        bl_a1 = antindices[:, 0]
+        bl_a2 = antindices[:, 1]
+        padded_uvw[ti * nbl : (ti + 1) * nbl, :] = station_uv[bl_a1] - station_uv[bl_a2]
 
     return dict(
         zip(

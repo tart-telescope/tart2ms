@@ -92,6 +92,7 @@ Thanks to Simon Perkins and Oleg Smirnov for help in interpreting the measuremen
 
 ## Changelog
 
+- 0.9.3 Vectorize `synthesize_uvw` baseline loop and `dense2sparse_uvw` time-index lookup; memoize per-epoch source conversions in `predict_model`. Switch default dask scheduler from `processes` to `threads` (configurable via `TART2MS_DASK_SCHEDULER`), which is faster and more reliable.
 - 0.9.2 Fix timezone-naive HDF5 timestamps by catching RuntimeError from utc.from_string.
 - 0.9.1 Handle timezone-naive timestamps in HDF5 files by assuming UTC.
 - 0.9.0 Major performance overhaul: vectorize `synthesize_uvw` inner antenna loop (~24× fewer casacore calls), vectorize `dense2sparse_uvw` per-row loop (~53× speedup), hoist `.compute()` out of `predict_model` timestamp loop, avoid per-source dask arrays in SOURCE table. Integrate `tart-catalogue-client` for single-TLE-fetch GNSS source catalogs using `celestial_positions` for direct RA/Dec (skipping azel2radec roundtrip). Increase default chunk size to 100,000 (`DEFAULT_CHUNK_SIZE`). Fix daskms Dataset infinite recursion with dunder-attr patch. Set astropy IERS `auto_max_age=None`.
