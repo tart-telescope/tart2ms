@@ -1,23 +1,20 @@
-## Docker container for testing tart2ms
+## Docker container for tart2ms
 
-This creates a docker container that makes life easy for testing. Just type
+The image installs tart2ms from this source tree with `uv sync --frozen`, so
+it gets exactly the dependency versions pinned in `uv.lock`: dask-ms from the
+[tmolteno/dask-ms](https://github.com/tmolteno/dask-ms) fork (git) using the
+[casacure](https://pypi.org/project/casacure/) table backend. No casacore C++
+libraries or python-casacore are needed. The build fails if dask-ms is not
+running on casacure.
 
-    make
-    
-in this directory, and through the magic of docker you'll be able to test using CASA. The local directory is available as /remote in the docker container.
+Build the image (the build context is the repository root):
 
-Some commands to use are:
+    make build
 
-=== casabrowser ===
+Open a shell in the container, with the repository mounted at `/tart2ms`:
 
-    cd remote
-    casabrowser
+    make run
 
-This lets you look at the contents of a measurement set.
+or convert data directly:
 
-=== casaviewer ===
-
-    cd remote
-    casaviewer
-
-Lets you view a fits file.
+    docker compose run --rm tart2ms tart2ms --hdf /tart2ms/test_data/vis_2026-06-12_04_25_46.149086.hdf --ms /tart2ms/test.ms --clobber
