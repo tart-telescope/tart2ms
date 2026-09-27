@@ -9,6 +9,14 @@
   by `iers.conf.auto_max_age = None` (fixed upstream in astropy 5.0.1,
   astropy/astropy#12713). No functional change.
 
+- **Issue #44 (`--archive-search`)**: added a `--archive-search "<Name>:START:INTERVAL:END"`
+  CLI option that queries HDF5 visibility files from the TART online archive (via
+  `tart_tools.archive_handler`) and converts them to a Measurement Set. START/END
+  accept minute offsets relative to now (e.g. `-10` = ten minutes ago, `0` = now) or
+  ISO-8601 timestamps; INTERVAL is the sampling interval in minutes. Query parsing
+  and window resolution live in `tart2ms/util.py` (`parse_archive_query`,
+  `archive_query_window`) and are covered by `tart2ms/tests/test_util.py`.
+
 ## v0.9.3 — Performance and dask scheduler
 
 ### Performance optimizations

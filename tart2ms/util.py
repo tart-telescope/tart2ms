@@ -12,6 +12,9 @@ import numpy as np
 import os
 import json
 import re
+from datetime import datetime, timedelta, timezone
+
+import dateutil.parser
 from astropy import constants
 from astropy.coordinates import SkyCoord
 # from astropy import units as u
@@ -121,3 +124,92 @@ def read_coordinate_twelveball(coordstring):
     return SkyCoord(f"{rah}h{ram}m{ras}s {sign}{decd}d{decm}m{decs}s",
                     equinox=equinox,
                     frame="fk5").icrs
+
+
+# ---------------------------------------------------------------------------
+# TART online archive queries (issue #44)
+#
+# Query syntax: <Name>:START:INTERVAL:END
+#   Name      telescope name in the archive bucket (e.g. signal, rhodes, ...)
+#   START     either a minute offset relative to now (e.g. -10 for ten minutes
+#             ago) or an ISO-8601 timestamp
+#   INTERVAL  sampling interval in minutes
+#   END       same syntax as START (e.g. 0 for now)
+#
+# Timestamps may themselves contain colons (e.g. 2022-08-17T15:14:58), so the
+# fields cannot simply be split on ':'. The grammar below matches each field
+# shape explicitly instead.
+# ---------------------------------------------------------------------------
+_ISO_TIMESTAMP = (
+    r"\d{4}-\d{2}-\d{2}T\d{2}"
+    r"(?::\d{2}(?::\d{2}(?:\.\d+)?)?)?"
+    r"(?:Z|[+-]\d{2}(?::\d{2})?)?"
+)
+_OFFSET_MINUTES = r"-?\d+(?:\.\d+)?"
+_ARCHIVE_QUERY_RE = re.compile(
+    rf"^(?P<name>[^:]+)"
+    rf":(?P<start>{_ISO_TIMESTAMP}|{_OFFSET_MINUTES})"
+    rf":(?P<interval>{_OFFSET_MINUTES})"
+    rf":(?P<end>{_ISO_TIMESTAMP}|{_OFFSET_MINUTES})$"
+)
+
+
+def parse_archive_query(query):
+    """Parse an archive query of the form '<Name>:START:INTERVAL:END'.
+
+    START and END are either minute offsets relative to now (e.g. -10 = ten
+    minutes ago, 0 = now) or ISO-8601 timestamps. INTERVAL is the sampling
+    interval in minutes. Examples:
+
+        signal:-10:1:0          last ten minutes, sampled every minute
+        rhodes:-100:10:0        last 100 minutes, sampled every 10 minutes
+        signal:2022-08-17T15:14:58:5:2022-08-17T16:14:58
+                                arbitrary START:INTERVAL:END window
+
+    Returns (name, start, interval_minutes, end) with start and end left as
+    raw field strings (see archive_query_window).
+    """
+    m = _ARCHIVE_QUERY_RE.match(query.strip())
+    if m is None:
+        raise ValueError(
+            f"Malformed archive query '{query}'. Expected <Name>:START:INTERVAL:END "
+            f"where START and END are minute offsets or ISO-8601 timestamps and "
+            f"INTERVAL is the sampling interval in minutes "
+            f"(e.g. 'signal:-10:1:0')"
+        )
+    interval = float(m["interval"])
+    if interval <= 0:
+        raise ValueError(
+            f"Archive query '{query}' has non-positive sampling interval {interval}"
+        )
+    return m["name"], m["start"], interval, m["end"]
+
+
+def archive_query_window(start, end, now=None):
+    """Resolve the START/END fields of an archive query to UTC datetimes.
+
+    Numeric fields are minute offsets relative to ``now`` (0 = now, -10 = ten
+    minutes ago); anything else is parsed as an ISO-8601 timestamp (naive
+    timestamps are assumed to be UTC).
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    def resolve(field):
+        if re.fullmatch(_OFFSET_MINUTES, field):
+            return now + timedelta(minutes=float(field))
+        ts = dateutil.parser.parse(field)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(timezone.utc)
+
+    start_utc = resolve(start)
+    end_utc = resolve(end)
+    if end_utc <= start_utc:
+        raise ValueError(
+            f"Archive query end time {end_utc.isoformat()} must be after "
+            f"start time {start_utc.isoformat()}"
+        )
+    return start_utc, end_utc
