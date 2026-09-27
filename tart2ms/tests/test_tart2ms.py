@@ -141,6 +141,37 @@ class TestTart2MS(unittest.TestCase):
             self.assertTrue(np.all(field_ids == 0),
                             f"All FIELD_ID should be 0, got {np.unique(field_ids)}")
 
+    def test_zero_gain_antenna_flagged(self):
+        '''Baselines touching zeroed-gain antennas must be flagged (issue #54)'''
+        test_ms = 'test_zerogain.ms'
+        shutil.rmtree(test_ms, ignore_errors=True)
+        bad_ant = 5
+        json_data = json.loads(json.dumps(self.json_data))  # deep copy
+        json_data['gains']['gain'][bad_ant] = 0.0
+        test_json = os.path.join(tempfile.gettempdir(), 'test_zerogain.json')
+        with open(test_json, 'w') as fp:
+            json.dump(json_data, fp)
+        ms_from_json(test_ms, test_json, pol2=False,
+                     phase_center_policy='instantaneous-zenith',
+                     override_telescope_name='TART',
+                     uvw_generator="telescope_snapshot",
+                     fetch_sources=False)
+
+        from casacore.tables import table
+        with table(test_ms, ack=False) as t:
+            a1 = t.getcol("ANTENNA1")
+            a2 = t.getcol("ANTENNA2")
+            flag = t.getcol("FLAG")
+
+        row_bad = (a1 == bad_ant) | (a2 == bad_ant)
+        self.assertGreater(np.count_nonzero(row_bad), 0,
+                           "test data should contain baselines with the zero-gain antenna")
+        self.assertTrue(np.all(flag[row_bad]),
+                        "rows with a zero-gain antenna should be flagged")
+        self.assertTrue(np.all(~flag[~row_bad]),
+                        "rows without the zero-gain antenna should not be flagged")
+        shutil.rmtree(test_ms, ignore_errors=True)
+
     def test_model_predict(self, test_ms="test_json_with_model.ms"):
         if AFRICANUS_DFT_AVAIL:
             shutil.rmtree(test_ms, ignore_errors=True)

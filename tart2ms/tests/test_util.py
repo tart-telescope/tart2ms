@@ -7,7 +7,9 @@
 import unittest
 from datetime import datetime, timezone
 
-from tart2ms.util import archive_query_window, parse_archive_query
+import numpy as np
+
+from tart2ms.util import archive_query_window, gain_flagged_antennas, parse_archive_query
 
 NOW = datetime(2026, 1, 20, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -106,6 +108,29 @@ class TestArchiveQueryWindow(unittest.TestCase):
             archive_query_window(
                 "2022-08-17T16:14:58", "2022-08-17T15:14:58", now=NOW
             )
+
+
+class TestGainFlaggedAntennas(unittest.TestCase):
+    """Zeroed gains mark antennas as switched off (issue #54)"""
+
+    def test_zero_gains_detected(self):
+        gains = np.array([1.0, 0.0, 1.602, 0.8924, 0.0])
+        np.testing.assert_array_equal(gain_flagged_antennas(gains), [1, 4])
+
+    def test_nonfinite_gains_detected(self):
+        gains = np.array([1.0, np.nan, np.inf, 2.0])
+        np.testing.assert_array_equal(gain_flagged_antennas(gains), [1, 2])
+
+    def test_all_good(self):
+        gains = np.array([1.0, 1.602, 0.8924])
+        self.assertEqual(gain_flagged_antennas(gains).size, 0)
+
+    def test_list_input(self):
+        self.assertEqual(gain_flagged_antennas([1.0, 0.0]).tolist(), [1])
+
+    def test_bad_shape_raises(self):
+        with self.assertRaises(ValueError):
+            gain_flagged_antennas(np.ones((2, 2)))
 
 
 if __name__ == "__main__":

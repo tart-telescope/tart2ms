@@ -46,7 +46,7 @@ from .ms_helper import (
     get_solar_system_bodies,
     predict_model,
 )
-from .util import rayleigh_criterion, read_known_phasings
+from .util import gain_flagged_antennas, rayleigh_criterion, read_known_phasings
 
 DEFAULT_CHUNK_SIZE = 100000
 DEFAULT_SIGMA = 1.0
@@ -239,6 +239,18 @@ def timestamp_to_ms_epoch(t_stamp):
     return quantity(t_stamp.isoformat()).get_value("s")
 
 
+def __baseline_flag_rows(baselines, flagged_antennas):
+    """Return a boolean array marking the visibility rows whose baseline
+    touches any of the given antennas (e.g. zeroed-gain antennas that must
+    be flagged, issue #54)."""
+    bl = np.asarray(baselines)
+    row_flags = np.zeros(bl.shape[0], dtype=bool)
+    if len(flagged_antennas) > 0:
+        row_flags |= np.isin(bl[:, 0], flagged_antennas)
+        row_flags |= np.isin(bl[:, 1], flagged_antennas)
+    return row_flags
+
+
 def ms_create(
     ms_table_name,
     info,
@@ -258,6 +270,7 @@ def ms_create(
     chunks_out=DEFAULT_CHUNK_SIZE,
     skip_sources_keywordtbl=False,
     cat_name_prefix="model_sources_",
+    flag_rows=None,
 ):
     """Create a Measurement Set from some TART observations
 
@@ -285,6 +298,10 @@ def ms_create(
                 "sampling_frequency": 16368000.0
             }
         },
+
+    flag_rows : array of bool, optional
+        One entry per visibility row. Rows marked True are written out with
+        FLAG set (e.g. baselines touching antennas with zeroed gains).
 
     Returns
     -------
@@ -804,6 +821,14 @@ def ms_create(
             0.05 * np.ones((row, 1, chan, corr)), chunks=(chunks["row"], 1, chan, corr)
         )
         flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
+        if flag_rows is not None:
+            flag_rows = np.asarray(flag_rows, dtype=np.bool_)
+            if flag_rows.shape[0] != row:
+                raise RuntimeError(
+                    f"Expected one flag entry per visibility row, "
+                    f"got {flag_rows.shape[0]} for {row} rows"
+                )
+            flag_data[flag_rows] = True
 
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks["row"], dtype=np.int32)
@@ -1569,6 +1594,7 @@ def ms_from_hdf5(
     all_times = []
     all_vis = []
     all_baselines = []
+    all_flag_rows = []
     ant_pos_orig = None
     orig_dico_info = None
     LOGGER.info("Will process HDF5 file: ")
@@ -1664,6 +1690,16 @@ def ms_from_hdf5(
             gains = h5f["gains"][:]
             phases = h5f["phases"][:]
 
+            # Antennas with zeroed gains are switched off -- flag their
+            # baselines before applycal can mask the problem (issue #54)
+            flagged_antennas = gain_flagged_antennas(gains)
+            if flagged_antennas.size > 0:
+                LOGGER.warning(
+                    f"Zero or non-finite gains for antenna(s) "
+                    f"{flagged_antennas.tolist()} in '{h5}' -- flagging all "
+                    f"baselines involving these antennas"
+                )
+
             hdf_timestamps = h5f["timestamp"]
 
             # Some HDF5 files store timestamps without timezone info.
@@ -1706,6 +1742,7 @@ def ms_from_hdf5(
                 for bl in baselines:
                     all_baselines.append(bl)
                 all_times.append(ts)
+                all_flag_rows.append(__baseline_flag_rows(baselines, flagged_antennas))
             if ts_this_h5 == 0:
                 p.next()
                 continue
@@ -1756,6 +1793,7 @@ def ms_from_hdf5(
         write_extragalactic_catalogs=write_extragalactic_catalogs,
         chunks_out=chunks_out,
         cat_name_prefix=cat_name_prefix,
+        flag_rows=np.concatenate(all_flag_rows) if all_flag_rows else None,
     )
 
 
@@ -1804,6 +1842,7 @@ def ms_from_json(
     all_sources = []
     all_sources_timestamps = []
     all_baselines = []
+    all_flag_rows = []
     ant_pos_orig = None
     orig_dico_info = None
     tscount = 0
@@ -1814,6 +1853,15 @@ def ms_from_json(
         config = settings.from_api_json(info["info"], ant_pos)
         gains = np.array(jdi["gains"]["gain"])
         phases = np.array(jdi["gains"]["phase_offset"])
+        # Antennas with zeroed gains are switched off -- flag their
+        # baselines before applycal can mask the problem (issue #54)
+        flagged_antennas = gain_flagged_antennas(gains)
+        if flagged_antennas.size > 0:
+            LOGGER.warning(
+                f"Zero or non-finite gains for antenna(s) "
+                f"{flagged_antennas.tolist()} -- flagging all baselines "
+                f"involving these antennas"
+            )
         if not applycal:
             gains[...] = 1.0
             phases[...] = 0.0
@@ -1928,6 +1976,7 @@ def ms_from_json(
             for bl in baselines:
                 all_baselines.append(bl)
             all_times.append(timestamp)
+            all_flag_rows.append(__baseline_flag_rows(baselines, flagged_antennas))
         p.next()
     LOGGER.info("<Done>")
     if tscount == 0:
@@ -1967,4 +2016,5 @@ def ms_from_json(
         write_extragalactic_catalogs=write_extragalactic_catalogs,
         chunks_out=chunks_out,
         cat_name_prefix=cat_name_prefix,
+        flag_rows=np.concatenate(all_flag_rows) if all_flag_rows else None,
     )

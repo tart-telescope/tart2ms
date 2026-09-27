@@ -33,6 +33,23 @@ def get_wavelengths(distance, frequency):
     return distance * frequency / constants.c.value
 
 
+def gain_flagged_antennas(gains, atol=0.0):
+    '''
+        Return the indices of antennas whose calibration gain is zero
+        (to within atol) or non-finite (issue #54).
+
+        Antennas with zeroed gains are typically switched off. Their
+        calibrated visibilities are meaningless and make external gain
+        solvers (e.g. CASA) blow up, so every baseline touching such an
+        antenna must be flagged.
+    '''
+    gains = np.asarray(gains, dtype=np.float64)
+    if gains.ndim != 1:
+        raise ValueError("Expected a one-dimensional array of per-antenna gains")
+    bad = ~np.isfinite(gains) | (np.abs(gains) <= atol)
+    return np.flatnonzero(bad)
+
+
 def rayleigh_criterion(max_freq, baseline_lengths):
     '''
         The accepted criterion for determining the diffraction limit to resolution

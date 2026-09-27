@@ -17,6 +17,14 @@
   and window resolution live in `tart2ms/util.py` (`parse_archive_query`,
   `archive_query_window`) and are covered by `tart2ms/tests/test_util.py`.
 
+- **Issue #54 (zero-gain antennas are auto-flagged)**: antennas whose stored
+  calibration gain is zero (or non-finite) now have every baseline touching them
+  written out with `FLAG` set, instead of silently producing meaningless
+  calibrated visibilities. The check runs on the stored gains in both the HDF5 and
+  JSON loaders (also with `--uncalibrated`, where zeroed gains would otherwise be
+  hidden by the gain override) and the per-row flags are passed to `ms_create` via
+  the new `flag_rows` argument.
+
 ## v0.9.3 — Performance and dask scheduler
 
 ### Performance optimizations
