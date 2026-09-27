@@ -1,5 +1,14 @@
 # Changes
 
+## Unreleased
+
+- **Issue #6 (astropy "overflow encountered in double_scalars")**: documented the
+  root cause in `tart2ms/tart2ms.py`. The logged `Time 5167445918.181001` value is
+  the observation epoch in seconds since the MJD epoch (the MS TIME convention), not
+  a bad timestamp. The RuntimeWarnings came from an astropy <= 5.0.0 bug triggered
+  by `iers.conf.auto_max_age = None` (fixed upstream in astropy 5.0.1,
+  astropy/astropy#12713). No functional change.
+
 ## v0.9.3 — Performance and dask scheduler
 
 ### Performance optimizations

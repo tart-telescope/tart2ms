@@ -70,6 +70,15 @@ from tart_client import CatalogueClient
 
 from astropy.utils.iers import conf as iers_conf
 # Allow interpolation beyond 30-day IERS table validity
+#
+# Note (issue #6): on astropy <= 5.0.0 this setting made the first UTC <-> TT
+# scale conversion compute TimeDelta(180 - np.finfo(float).max) inside
+# LeapSeconds.auto_open (astropy/utils/iers/iers.py). That ~1.8e308 value trips
+# numpy "overflow encountered in double_scalars" RuntimeWarnings in
+# astropy.time.utils.split shortly after the "Time ..." log line. The warnings
+# are non-catastrophic (the times themselves are exact) and were fixed upstream
+# in astropy 5.0.1 (astropy/astropy#12713); the astropy version required here
+# is not affected.
 iers_conf.auto_max_age = None
 
 # ---------------------------------------------------------------------------
