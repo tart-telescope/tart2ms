@@ -151,7 +151,7 @@ class TestTart2MS(unittest.TestCase):
                         fill_model=True,
                         writemodelcatalog=True,
                         fetch_sources=False)
-            from pyrap.tables import table as tbl
+            from casacore.tables import table as tbl
             with tbl(test_ms) as tt:
                 self.assertTrue("MODEL_DATA" in tt.colnames())
         else:

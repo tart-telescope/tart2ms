@@ -90,6 +90,31 @@ wheels = [
 ]
 
 [[package]]
+name = "casacure"
+version = "3.8.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/70/3a/ad440e5033a3b77b24798f78fe1f634e32e064eb07112264d8e71e1ba839/casacure-3.8.13.tar.gz", hash = "sha256:56af02b50cbbf466737215b39b49a110d313f98e1ad5167274134c7c28e16ca4", size = 300879, upload-time = "2026-09-27T03:38:50.566Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/82/13989e1de2d42e58712101aa8c703403e49bb5b0330583e771883a5a0915/casacure-3.8.13-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:a86429c453ff67a2ac6330c9953bdf71f8584ac2d3dfff9bf89e405749c00b42", size = 1118858, upload-time = "2026-09-27T03:38:18.243Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/a2/8639e6f4606769acabde32ba5c6ed8058b1a1de56b6a8623a0be7156efb5/casacure-3.8.13-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2c675bc77b1989de20ef765e87f55a4ae591c12fb88d98d23a2987294ba7ae92", size = 1158283, upload-time = "2026-09-27T03:38:19.956Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/2a/07aba117cbd92aa08a5950c165c7ed10403397fe6159440e47137aab7b5a/casacure-3.8.13-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f38c908a3aca2b513a333c42ba62636538265208c932ed0cbcd292643c667937", size = 1217528, upload-time = "2026-09-27T03:38:21.562Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/e4/b6e06daea6124f0194b2b78e924b54191fe5a45772ba08b3f98e746cc963/casacure-3.8.13-cp311-cp311-win_amd64.whl", hash = "sha256:a25ad1083786918c6c16fe805812b3b11ad6fd106110e2de72f4e6e9e3b0dc19", size = 1098634, upload-time = "2026-09-27T03:38:22.927Z" },
+    { url = "https://files.pythonhosted.org/packages/00/ea/9333d98b5336084a0f795a2fea806cebe9940701b3fec00b426b56730041/casacure-3.8.13-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:b9ef0c18a8f46406f58b7d70479f481e094adcafa9b2e69b6d5f5f5df53d4e4c", size = 1115642, upload-time = "2026-09-27T03:38:24.591Z" },
+    { url = "https://files.pythonhosted.org/packages/05/56/a3f0e6d490b210c18be545cdf1cfedecd67c9a76cf3f5c5426a5cc6715a5/casacure-3.8.13-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ef866a6be8a5c057b8e0bf89d41814b5a2e4eedc4936d4e920d835f08b6902a1", size = 1158628, upload-time = "2026-09-27T03:38:25.997Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/eb/78ac196b0de52ea674e1c6a1556b6c501b990669c176f24fa412fd3c428a/casacure-3.8.13-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7c831f67c7efbc0a0fa183ef49f7f812433f4c39336a8ea16495477eec5ce6bc", size = 1221805, upload-time = "2026-09-27T03:38:27.314Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/7e/ced868a86e5e2da7d1b5d4322642eb193300b47796e51009576027106046/casacure-3.8.13-cp312-cp312-win_amd64.whl", hash = "sha256:2dae47aa41508a46fbb0c48e8e8647c8117516834bf9d267a2a925c4bfc5a1be", size = 1097749, upload-time = "2026-09-27T03:38:28.905Z" },
+    { url = "https://files.pythonhosted.org/packages/35/f9/1186185019165527aebc5cfeda328f4a2c3529eca2d5ccd9c500adadb558/casacure-3.8.13-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:6b0f7889ceba5ce1331363bc6ae6cfc49b925c120e1a197beee11336d5ebb290", size = 1117006, upload-time = "2026-09-27T03:38:30.238Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/15/4e80678914349044732c875ee7aa29083c8755d27acc122803639938ae82/casacure-3.8.13-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:13d6688879596cdd03a24fa3cab6c9b37fd572b17d3c1973b62484a290257b39", size = 1158130, upload-time = "2026-09-27T03:38:31.815Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/29/6d9abe6b5ee62c32df6386ddac556f1d4c87c341ebc405b645da40b9dd74/casacure-3.8.13-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f3fb7649520409d51ebdc1d3ef03c298a7e2b72b67722311f8dcc91b51d7cafc", size = 1221922, upload-time = "2026-09-27T03:38:33.178Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/b0/996cb6709cf0309c2d16fc85df28d487b424bb9159164ebaf0fe6ba4abe6/casacure-3.8.13-cp313-cp313-win_amd64.whl", hash = "sha256:e72511870b159325c62cb2672ed3cf0c16bce59d7a74b35b56a5fd9997609134", size = 1098344, upload-time = "2026-09-27T03:38:34.631Z" },
+    { url = "https://files.pythonhosted.org/packages/27/c4/4632c326890c33eb6594d86cb78e1756a3f95c3140c266c6259e7eb1e8d2/casacure-3.8.13-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f12590e17d00980643cb4478114993cf9302642bb080e15d129a091fae7305b4", size = 1158125, upload-time = "2026-09-27T03:38:47.74Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/c1/eedcffbcab22300b4e75847501c180ff0f555408af410bb2a32437040540/casacure-3.8.13-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6cac6b8006ec1ba754a6b53c7338573e7b892bf9e456663bfd18846c47d9a470", size = 1217862, upload-time = "2026-09-27T03:38:49.235Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.6.17"
 source = { registry = "https://pypi.org/simple" }
@@ -268,7 +293,7 @@ array = [
 [[package]]
 name = "dask-ms"
 version = "0.2.32"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/tmolteno/dask-ms?branch=master#01963dd71cc442c39c2bd693742e6b494c44cffa" }
 dependencies = [
     { name = "appdirs" },
     { name = "cacheout" },
@@ -276,11 +301,11 @@ dependencies = [
     { name = "donfig" },
     { name = "fsspec" },
     { name = "numpy" },
-    { name = "python-casacore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/1c/633352b44d049a7c7c1c3d17a72408f3e6cfd6ef9b1221e2ca2500ca1acf/dask_ms-0.2.32.tar.gz", hash = "sha256:db26ca2baeb179c4ddda2424cf9ab2f24380df9ce9c39f53afdf1db70dfb6991", size = 160295, upload-time = "2026-05-18T10:05:44.023Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/f0/6b154608ed28be8d535527ef081852519decdd419fe2f032160997478386/dask_ms-0.2.32-py3-none-any.whl", hash = "sha256:19903236caf74c40ad8d59acfe1ed817b8a9334ac5b07762364ae6e6a4d0f170", size = 172024, upload-time = "2026-05-18T10:05:42.461Z" },
+
+[package.optional-dependencies]
+casacure = [
+    { name = "casacure" },
 ]
 
 [[package]]
@@ -626,20 +651,6 @@ wheels = [
 ]
 
 [[package]]
-name = "python-casacore"
-version = "3.8.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/66/61/96bbc8e1c9751bc83a70a9e94154b9bff3633a56584c00c374dfb1591df1/python_casacore-3.8.1.tar.gz", hash = "sha256:757763cbf5bcb8e98b6809308de107bcb9b41982779b17f163ef20ca0ec18322", size = 288771, upload-time = "2026-06-26T08:19:05.304Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/cd/78/9e02da53633e558dfdb75ee8f8a5812a8a723fa1825940675ee958f381e2/python_casacore-3.8.1-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:e8472fb93848a90ebc89161e111804015481b08fd628e7df6d5262437b844b43", size = 45680290, upload-time = "2026-06-26T08:18:50.049Z" },
-    { url = "https://files.pythonhosted.org/packages/fb/11/01382c28e51adba5dd14cafdfa5c081ddbaeb069fdb1ade3940aa7cc367e/python_casacore-3.8.1-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:9cb9cecb4cb821a70ce4258dec0f5b3d5088a66317afc0df201ff19ebd4d5da9", size = 45683411, upload-time = "2026-06-26T08:18:57.194Z" },
-    { url = "https://files.pythonhosted.org/packages/64/d9/e221b2b721b16d8c04d5741ed18f571c90cc0c8cb3ba7bc571bb3b5804d8/python_casacore-3.8.1-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:cbdf22d3329eb7f550c279872d7c5a23eb307298bec86063bccec4683b4da989", size = 45683464, upload-time = "2026-06-26T08:19:00.003Z" },
-]
-
-[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -877,13 +888,13 @@ version = "0.9.3"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },
+    { name = "casacure" },
     { name = "codex-africanus" },
-    { name = "dask-ms" },
+    { name = "dask-ms", extra = ["casacure"] },
     { name = "h5py" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "progress" },
-    { name = "python-casacore" },
     { name = "requests" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -895,13 +906,13 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "astropy", specifier = ">=7.1.0,<9.0.0" },
+    { name = "casacure", specifier = ">=3.8.13,<4.0.0" },
     { name = "codex-africanus", specifier = ">=0.4.2,<0.5" },
-    { name = "dask-ms", specifier = ">=0.2.0,<0.3.0" },
+    { name = "dask-ms", extras = ["casacure"], git = "https://github.com/tmolteno/dask-ms?branch=master" },
     { name = "h5py", specifier = ">=3.1.0,<4.0.0" },
     { name = "numpy", specifier = ">=1.6.0,<3.0.0" },
     { name = "pandas", specifier = ">=2.0.0,<3.0.0" },
     { name = "progress", specifier = ">=1.6.1,<2.0.0" },
-    { name = "python-casacore", specifier = ">=3.7.1,<4.0.0" },
     { name = "requests", specifier = ">=2.32.4,<3.0.0" },
     { name = "scipy", specifier = ">=1.16.1,<2.0.0" },
     { name = "tart", specifier = ">=1.4.0" },
