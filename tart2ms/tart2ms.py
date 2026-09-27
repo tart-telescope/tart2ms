@@ -29,7 +29,6 @@ from astropy import coordinates as ac
 from astropy.constants import R_earth
 from astropy.coordinates import Angle, EarthLocation, SkyCoord
 from astropy.time import Time
-from casacore.quanta import quantity
 from dask.diagnostics import ProgressBar
 from daskms import Dataset, xds_to_table
 from tart.imaging import calibration
@@ -39,7 +38,7 @@ from tart.util import utc
 from tart_tools import api_imaging
 
 from .catalogs import catalog_reader
-from .fixvis import dense2sparse_uvw, fixms, progress, rephase, synthesize_uvw
+from .fixvis import baseline_uvw, progress, rephase
 from .ms_helper import (
     azel2radec,
     get_catalog_sources_azel,
@@ -91,11 +90,8 @@ iers_conf.auto_max_age = None
 #     patch exists precisely because the multiprocessing scheduler introspects
 #     objects during pickling).
 #
-# The casacore.measures code in fixvis.py (``synthesize_uvw``/``fixms``) is
-# documented as not thread-safe, but it never runs *through* the dask
-# scheduler - it is invoked in plain Python loops in the main thread - so the
-# dask-level scheduler is free to be threaded or synchronous without touching
-# that code path.
+# UVW synthesis in fixvis.py uses astropy/erfa (no casacore.measures) and is
+# computed with numpy in the main thread before the write graph is built.
 #
 # We therefore default to ``threads`` (parallel, reliable, and the fastest of
 # the local schedulers on the dask-ms write path) while still allowing the
@@ -227,7 +223,17 @@ def timestamp_to_ms_epoch(t_stamp):
       The epoch time ``t`` in seconds suitable for fields in
       measurement sets.
     """
-    return quantity(t_stamp.isoformat()).get_value("s")
+    return float(timestamps_to_ms_epoch([t_stamp])[0])
+
+
+def timestamps_to_ms_epoch(t_stamps):
+    """Vectorized timestamp_to_ms_epoch: UTC MJD seconds for each timestamp."""
+    t_stamps = list(t_stamps)
+    if len(t_stamps) == 0:
+        return np.empty(0, dtype=np.float64)
+    t = Time(t_stamps, scale="utc")
+    # Split jd1/jd2 to keep sub-microsecond precision on ~5e9 s values
+    return ((t.jd1 - 2400000.5) + t.jd2) * 86400.0
 
 
 def ms_create(
@@ -297,8 +303,8 @@ def ms_create(
     # but we could forseeably load them in (or augment) separately in the future
     if sources_timestamps is None:
         sources_timestamps = timestamps
-    epoch_s = list(map(timestamp_to_ms_epoch, timestamps))
-    epoch_s_sources = list(map(timestamp_to_ms_epoch, sources_timestamps))
+    epoch_s = list(timestamps_to_ms_epoch(timestamps))
+    epoch_s_sources = list(timestamps_to_ms_epoch(sources_timestamps))
     LOGGER.debug(f"Time {epoch_s}")
     LOGGER.info(f"Min time: {np.min(timestamps)} -- {np.min(epoch_s)}")
     LOGGER.info(f"Max time: {np.max(timestamps)} -- {np.max(epoch_s)}")
@@ -374,7 +380,7 @@ def ms_create(
         for lon, lat in ant_lon_lat
     ]
     ant_positions = [[e.x.value, e.y.value, e.z.value] for e in ant_locations]
-    antenna_itrf_pos = position = da.asarray(ant_positions)
+    position = da.asarray(ant_positions)
 
     # Antenna diameter in meters
     diameter = da.ones(num_ant) * 0.025
@@ -452,21 +458,30 @@ def ms_create(
     assert direction.shape[0] == 1
     assert direction.shape[1] == 2
 
-    def __twelveball(direction):
-        """standardized Jhhmmss-ddmmss name"""
-        sc_dir = SkyCoord(direction[0] * u.rad, direction[1] * u.rad, frame="icrs")
-        sign = "-" if sc_dir.dec.dms[0] < 0 else "+"
-        sc_dir_repr = (
-            f"J{sc_dir.ra.hms[0]:02.0f}{sc_dir.ra.hms[1]:02.0f}{sc_dir.ra.hms[2]:02.0f}"
-            f"{sign}"
-            f"{abs(sc_dir.dec.dms[0]):02.0f}{abs(sc_dir.dec.dms[1]):02.0f}{abs(sc_dir.dec.dms[2]):02.0f}"
+    def __twelveball(directions):
+        """standardized Jhhmmss-ddmmss names for an (n, 2) array of (ra, dec) radians"""
+        sc_dir = SkyCoord(
+            directions[:, 0] * u.rad, directions[:, 1] * u.rad, frame="icrs"
         )
-        return sc_dir_repr
+        ra_h, ra_m, ra_s = sc_dir.ra.hms
+        dec_d, dec_m, dec_s = sc_dir.dec.dms
+        return [
+            f"J{rh:02.0f}{rm:02.0f}{rs:02.0f}"
+            f"{'-' if dec < 0 else '+'}"
+            f"{abs(dd):02.0f}{abs(dm):02.0f}{abs(ds):02.0f}"
+            for rh, rm, rs, dec, dd, dm, ds in zip(
+                ra_h, ra_m, ra_s, directions[:, 1], dec_d, dec_m, dec_s
+            )
+        ]
 
-    directions = direction.T
-    for d in directions:
+    directions = direction.reshape(2, direction.shape[2]).T
+    if LOGGER.isEnabledFor(logging.DEBUG):
+        for d, name in zip(directions, __twelveball(directions)):
+            LOGGER.debug(f"    shapshot direction {d[0]}, {d[1]} {name}")
+    else:
+        first, last = __twelveball(directions[[0, -1]])
         LOGGER.info(
-            f"    shapshot direction {d[0]}, {d[1]} {__twelveball(d.flatten())}"
+            f"    {directions.shape[0]} snapshot directions: {first} ... {last}"
         )
 
     use_special_fn = None
@@ -539,7 +554,7 @@ def ms_create(
     else:
         field_name = da.asarray(
             np.array(
-                list(map(__twelveball, direction.reshape(2, direction.shape[2]).T)),
+                __twelveball(direction.reshape(2, direction.shape[2]).T),
                 dtype=object,
             ),
             chunks=direction.shape[2],
@@ -737,12 +752,16 @@ def ms_create(
         "row": min(vis_array.shape[0], chunks_out),
     }
     baselines = np.array(baselines)
-    nbl = np.unique(baselines, axis=0).shape[0]
-    baseline_lengths = (
-        da.sqrt(
-            (antenna_itrf_pos[baselines[:, 0]] - antenna_itrf_pos[baselines[:, 1]]) ** 2
+    unique_baselines = np.unique(baselines, axis=0)
+    nbl = unique_baselines.shape[0]
+    antenna_itrf_pos_np = np.asarray(ant_positions, dtype=np.float64)
+    baseline_lengths = np.sqrt(
+        (
+            antenna_itrf_pos_np[unique_baselines[:, 0]]
+            - antenna_itrf_pos_np[unique_baselines[:, 1]]
         )
-    ).compute()
+        ** 2
+    )
 
     rayleigh_crit = rayleigh_criterion(
         max_freq=np.max(spw_chan_freqs), baseline_lengths=baseline_lengths
@@ -783,18 +802,24 @@ def ms_create(
         # Create some dask vis data
         dims = ("row", "chan", "corr")
         LOGGER.debug(f"Data size {row} {chan} {corr}")
-        LOGGER.info(f"Data column size {row * chan * corr * 8 / 1024.0**2:.2f} MiB")
+        # MS DATA is single precision COMPLEX
+        data_dtype = np.complex64
+        LOGGER.info(
+            f"Data column size "
+            f"{row * chan * corr * np.dtype(data_dtype).itemsize / 1024.0**2:.2f} MiB"
+        )
 
-        np_data = np.zeros((row, chan, corr), dtype=np.complex128)
-        for i in range(corr):
-            np_data[:, :, i] = vis_array.reshape((row, chan))
+        np_data = np.broadcast_to(
+            np.asarray(vis_array, dtype=data_dtype).reshape((row, chan, 1)),
+            (row, chan, corr),
+        )
 
         data_chunks = tuple((chunks["row"], chan, corr))
         dask_data = da.from_array(np_data, chunks=data_chunks)
-        flag_categories = da.from_array(
-            0.05 * np.ones((row, 1, chan, corr)), chunks=(chunks["row"], 1, chan, corr)
+        # A single, unset flag category
+        flag_categories = da.zeros(
+            (row, 1, chan, corr), chunks=(chunks["row"], 1, chan, corr), dtype=bool
         )
-        flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
 
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks["row"], dtype=np.int32)
@@ -869,9 +894,8 @@ def ms_create(
         zenith_directions = zenith_directions.reshape(
             zenith_directions.shape[1], zenith_directions.shape[2]
         ).T.copy()
-        map_row_to_zendir = da.from_array(
-            np.arange(len(epoch_s), dtype=int).repeat(nbl), chunks=chunks["row"]
-        )
+        map_row_to_zendir_np = np.arange(len(epoch_s), dtype=int).repeat(nbl)
+        map_row_to_zendir = da.from_array(map_row_to_zendir_np, chunks=chunks["row"])
         if uvw_generator == "telescope_snapshot":
             if (
                 isinstance(phase_center_policy, SkyCoord)
@@ -955,35 +979,16 @@ def ms_create(
                 else:
                     raise RuntimeError("Invalid rephase option")
 
-                map_row_to_zendir_np = map_row_to_zendir.compute()
-                subfields = np.unique(map_row_to_zendir_np)
-                assert zenith_directions.shape[0] == subfields.size
-                antenna_itrf_pos_np = antenna_itrf_pos.compute()
-                p = progress(
-                    "Computing UVW towards original zenith points", max=subfields.size
+                assert zenith_directions.shape[0] == len(epoch_s)
+                LOGGER.info("Computing UVW towards original zenith points")
+                uvw_array = baseline_uvw(
+                    antenna_itrf_pos_np,
+                    timems,
+                    baselines[:, 0],
+                    baselines[:, 1],
+                    zenith_directions,
+                    dir_index=map_row_to_zendir_np,
                 )
-                uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
-                for sfi in subfields:
-                    selrow = map_row_to_zendir_np == sfi
-                    this_phase_dir = zenith_directions[sfi].reshape(1, 2)
-                    padded_uvw = synthesize_uvw(
-                        station_ECEF=antenna_itrf_pos_np,
-                        time=timems[selrow],
-                        a1=baselines[:, 0][selrow],
-                        a2=baselines[:, 1][selrow],
-                        phase_ref=this_phase_dir,
-                        ack=False,
-                    )
-                    uvw_array[selrow] = dense2sparse_uvw(
-                        a1=baselines[:, 0][selrow],
-                        a2=baselines[:, 1][selrow],
-                        time=timems[selrow],
-                        ddid=(np.ones(selrow.size, dtype=int) * ddid)[selrow],
-                        padded_uvw=padded_uvw["UVW"],
-                        ack=False,
-                    )
-                    p.next()
-                LOGGER.info("<Done>")
             else:
                 # no model or rephasing --- we will wait to the end to fill zenith positions
                 uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
@@ -1084,21 +1089,34 @@ def ms_create(
                 if solar_model is None:
                     solar_model = da.zeros_like(dask_data)
                 model_data += solar_model
-                model_data.rechunk(dask_data.chunks)
 
-        def __rephase_dask_wrapper(
-            vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1
-        ):
+        def __rephase_dask_wrapper(vis, uvw, field_ids, freq, pos, refdir):
             vis = np.array(vis[0]) if isinstance(vis, list) else vis
             uvw = np.array(uvw[0]) if isinstance(uvw, list) else uvw
             field_ids = (
                 np.array(field_ids[0]) if isinstance(field_ids, list) else field_ids
             )
-            sel = np.array(sel[0]) if isinstance(sel, list) else sel
-            return rephase(
-                vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=phasesign
+            sel = np.ones(vis.shape[0], dtype=bool)
+            return rephase(vis, uvw, field_ids, sel, freq, pos, refdir)
+
+        def __rephase_dask(data, pos):
+            return da.blockwise(
+                __rephase_dask_wrapper,
+                ("row", "chan", "corr"),
+                data,
+                ("row", "chan", "corr"),
+                uvw_data,
+                ("row", "uvw"),
+                map_row_to_zendir,
+                ("row",),
+                dtype=data.dtype,
+                freq=spw_chan_freqs[spw_id],
+                pos=pos,
+                refdir=np.rad2deg(zenith_directions),
             )
 
+        # per-timestamp phase centre (non-sidereal special body tracking)
+        per_timestamp_centre = False
         if (
             isinstance(phase_center_policy, SkyCoord)
             or phase_center_policy.find("rephase-") == 0
@@ -1116,168 +1134,69 @@ def ms_create(
                 LOGGER.info(
                     f"Per user request: Rephase all data to {new_phase_dir_repr}"
                 )
-                rephased_data = da.empty_like(dask_data)
-                sel = da.ones(
-                    dask_data.shape[0], chunks=dask_data.chunks[0], dtype=bool
-                )
-                rephased_data = da.blockwise(
-                    __rephase_dask_wrapper,
-                    ("row", "chan", "corr"),
-                    dask_data,
-                    ("row", "chan", "corr"),
-                    uvw_data,
-                    ("row", "uvw"),
-                    map_row_to_zendir,
-                    ("row",),
-                    sel,
-                    ("row",),
-                    dtype=dask_data.dtype,
-                    freq=spw_chan_freqs[spw_id],
-                    pos=np.rad2deg(centroid_direction[0, :]),
-                    refdir=np.rad2deg(zenith_directions),
-                )
-                dask_data = rephased_data
-                rephased_data = da.empty_like(dask_data)
-                if fill_model:
-                    sel = da.ones(
-                        model_data.shape[0], chunks=model_data.chunks[0], dtype=bool
-                    )
-                    rephased_data = da.blockwise(
-                        __rephase_dask_wrapper,
-                        ("row", "chan", "corr"),
-                        model_data,
-                        ("row", "chan", "corr"),
-                        uvw_data,
-                        ("row", "uvw"),
-                        map_row_to_zendir,
-                        ("row",),
-                        sel,
-                        ("row",),
-                        dtype=dask_data.dtype,
-                        freq=spw_chan_freqs[spw_id],
-                        pos=np.rad2deg(centroid_direction[0, :]),
-                        refdir=np.rad2deg(zenith_directions),
-                    )
-                    model_data = rephased_data
+                rephase_pos = np.rad2deg(centroid_direction[0, :])
             elif centroid_direction.shape[0] == len(obstime):
                 LOGGER.info(
                     f"Per user request: Rephase data to special field {phase_center_policy.replace('rephase-', '')} per timestamp"
                 )
-                rephased_data = da.zeros_like(dask_data)
-                subfields = np.unique(map_row_to_zendir)
-                for sfi in subfields.compute():
-                    sel = map_row_to_zendir == sfi
-                    rephased_data += da.blockwise(
-                        __rephase_dask_wrapper,
-                        ("row", "chan", "corr"),
-                        dask_data,
-                        ("row", "chan", "corr"),
-                        uvw_data,
-                        ("row", "uvw"),
-                        map_row_to_zendir,
-                        ("row",),
-                        sel,
-                        ("row",),
-                        # kwargs for rephase
-                        freq=spw_chan_freqs[spw_id],
-                        pos=np.rad2deg(centroid_direction[sfi, :]),
-                        refdir=np.rad2deg(zenith_directions),
-                        dtype=dask_data.dtype,
-                    )
-                dask_data = rephased_data
-                if fill_model:
-                    rephased_data = da.zeros_like(dask_data)
-                    for sfi in subfields.compute():
-                        sel = map_row_to_zendir == sfi
-                        rephased_data += da.blockwise(
-                            __rephase_dask_wrapper,
-                            ("row", "chan", "corr"),
-                            model_data,
-                            ("row", "chan", "corr"),
-                            uvw_data,
-                            ("row", "uvw"),
-                            map_row_to_zendir,
-                            ("row",),
-                            sel,
-                            ("row",),
-                            # kwargs for rephase
-                            freq=spw_chan_freqs[spw_id],
-                            pos=np.rad2deg(centroid_direction[sfi, :]),
-                            refdir=np.rad2deg(zenith_directions),
-                            dtype=model_data.dtype,
-                        )
-                    model_data = rephased_data
-
-                # regenerate UVW coordinates for special non-sidereal positions
-                p = progress(
-                    f"Computing UVW towards special field {phase_center_policy.replace('rephase-', '')}",
-                    max=subfields.compute().size,
-                )
-                uvw_array = np.zeros((vis_array.shape[0], 3), dtype=np.float64)
-                for sfi in subfields.compute():
-                    selrow = map_row_to_zendir.compute() == sfi
-                    this_phase_dir = centroid_direction[sfi].reshape(1, 2)
-                    padded_uvw = synthesize_uvw(
-                        station_ECEF=antenna_itrf_pos.compute(),
-                        time=timems[selrow],
-                        a1=baselines[:, 0][selrow],
-                        a2=baselines[:, 1][selrow],
-                        phase_ref=this_phase_dir,
-                        ack=False,
-                    )
-                    uvw_array[selrow] = dense2sparse_uvw(
-                        a1=baselines[:, 0][selrow],
-                        a2=baselines[:, 1][selrow],
-                        time=timems[selrow],
-                        ddid=(np.ones(selrow.size) * ddid)[selrow],
-                        padded_uvw=padded_uvw["UVW"],
-                        ack=False,
-                    )
-                    p.next()
-                uvw_data = da.from_array(np_uvw, chunks=(chunks["row"], 3))
-                LOGGER.info("<Done>")
+                # one target position per original zenith field (i.e. per timestamp)
+                rephase_pos = np.rad2deg(centroid_direction)
+                per_timestamp_centre = True
             else:
                 raise RuntimeError(
                     "Rephaseing centroids must be 1 or a centre per original zenith position"
                 )
+            dask_data = __rephase_dask(dask_data, rephase_pos)
+            if fill_model:
+                model_data = __rephase_dask(model_data, rephase_pos)
         else:
             LOGGER.info("No rephasing requested - field centers left as is")
 
+        if uvw_generator == "casacore":
+            # Final UVW towards each row's phase centre, computed once here
+            # rather than rewriting the UVW column after the MS is written
+            if per_timestamp_centre:
+                final_dirs, final_dir_index = centroid_direction, map_row_to_zendir_np
+            else:
+                final_dirs = direction.reshape(2, direction.shape[2]).T
+                final_dir_index = field_no
+            LOGGER.info("Computing UVW towards field phase centres")
+            uvw_data = da.from_array(
+                baseline_uvw(
+                    antenna_itrf_pos_np,
+                    timems,
+                    baselines[:, 0],
+                    baselines[:, 1],
+                    final_dirs,
+                    dir_index=final_dir_index,
+                ),
+                chunks=(chunks["row"], 3),
+            )
+
+        row_chunks = (chunks["row"],)
+
+        def __row_const(value, dtype, shape=()):
+            """Lazily generated constant column (nothing materialised up front)"""
+            return da.full(
+                (row, *shape), value, dtype=dtype, chunks=row_chunks + shape
+            )
+
         main_table = {
             "DATA": (dims, dask_data),
-            "FLAG": (
-                dims,
-                da.from_array(flag_data, chunks=(chunks["row"], chan, corr)),
-            ),
-            "TIME": (("row",), da.from_array(timems, chunks=chunks["row"])),
-            "TIME_CENTROID": ("row", da.from_array(timems, chunks=chunks["row"])),
-            "WEIGHT": (
-                ("row", "corr"),
-                da.from_array(
-                    DEFAULT_WEIGHT * np.ones((row, corr)), chunks=(chunks["row"], corr)
-                ),
-            ),
+            "FLAG": (dims, __row_const(False, bool, (chan, corr))),
+            "TIME": (("row",), da.from_array(timems, chunks=row_chunks)),
+            "TIME_CENTROID": ("row", da.from_array(timems, chunks=row_chunks)),
+            "WEIGHT": (("row", "corr"), __row_const(DEFAULT_WEIGHT, np.float32, (corr,))),
             "WEIGHT_SPECTRUM": (
                 dims,
-                da.from_array(
-                    DEFAULT_WEIGHT * np.ones_like(np_data, dtype=np.float64),
-                    chunks=(chunks["row"], chan, corr),
-                ),
+                __row_const(DEFAULT_WEIGHT, np.float32, (chan, corr)),
             ),
             # BH: conformance issue, see CASA documentation on weighting
             "SIGMA_SPECTRUM": (
                 dims,
-                da.from_array(
-                    DEFAULT_SIGMA * np.ones_like(np_data, dtype=np.float64),
-                    chunks=(chunks["row"], chan, corr),
-                ),
+                __row_const(DEFAULT_SIGMA, np.float32, (chan, corr)),
             ),
-            "SIGMA": (
-                ("row", "corr"),
-                da.from_array(
-                    DEFAULT_SIGMA * np.ones((row, corr)), chunks=(chunks["row"], corr)
-                ),
-            ),
+            "SIGMA": (("row", "corr"), __row_const(DEFAULT_SIGMA, np.float32, (corr,))),
             "UVW": (
                 (
                     "row",
@@ -1288,42 +1207,46 @@ def ms_create(
             "FLAG_CATEGORY": (("row", "flagcat", "chan", "corr"), flag_categories),
             "ANTENNA1": (
                 ("row",),
-                da.from_array(baselines[:, 0], chunks=chunks["row"]),
+                da.from_array(baselines[:, 0].astype(np.int32), chunks=row_chunks),
             ),
             "ANTENNA2": (
                 ("row",),
-                da.from_array(baselines[:, 1], chunks=chunks["row"]),
+                da.from_array(baselines[:, 1].astype(np.int32), chunks=row_chunks),
             ),
-            "FEED1": (("row",), da.from_array(baselines[:, 0], chunks=chunks["row"])),
-            "FEED2": (("row",), da.from_array(baselines[:, 1], chunks=chunks["row"])),
+            "FEED1": (
+                ("row",),
+                da.from_array(baselines[:, 0].astype(np.int32), chunks=row_chunks),
+            ),
+            "FEED2": (
+                ("row",),
+                da.from_array(baselines[:, 1].astype(np.int32), chunks=row_chunks),
+            ),
             "DATA_DESC_ID": (("row",), dask_ddid),
-            "PROCESSOR_ID": (
+            "PROCESSOR_ID": (("row",), __row_const(0, np.int32)),
+            "FIELD_ID": (
                 ("row",),
-                da.from_array(np.zeros(row, dtype=int), chunks=chunks["row"]),
+                da.from_array(field_no.astype(np.int32), chunks=row_chunks),
             ),
-            "FIELD_ID": (("row",), da.from_array(field_no, chunks=chunks["row"])),
-            "INTERVAL": (("row",), da.from_array(intervals, chunks=chunks["row"])),
-            "EXPOSURE": (("row",), da.from_array(exposure, chunks=chunks["row"])),
-            "SCAN_NUMBER": (("row",), da.from_array(scan, chunks=chunks["row"])),
-            "ARRAY_ID": (
+            "INTERVAL": (("row",), da.from_array(intervals, chunks=row_chunks)),
+            "EXPOSURE": (("row",), da.from_array(exposure, chunks=row_chunks)),
+            "SCAN_NUMBER": (
                 ("row",),
-                da.from_array(np.zeros(row, dtype=int), chunks=chunks["row"]),
+                da.from_array(scan.astype(np.int32), chunks=row_chunks),
             ),
-            "OBSERVATION_ID": (
-                ("row",),
-                da.from_array(np.zeros(row, dtype=int), chunks=chunks["row"]),
-            ),
-            "STATE_ID": (
-                ("row",),
-                da.from_array(np.zeros(row, dtype=int), chunks=chunks["row"]),
-            ),
+            "ARRAY_ID": (("row",), __row_const(0, np.int32)),
+            "OBSERVATION_ID": (("row",), __row_const(0, np.int32)),
+            "STATE_ID": (("row",), __row_const(0, np.int32)),
         }
         if fill_model:
             main_table["MODEL_DATA"] = (dims, model_data)
         dataset = Dataset(main_table)
         ms_datasets.append(dataset)
 
-    ms_writes = xds_to_table(ms_datasets, ms_table_name, columns="ALL")
+    # Force the MS descriptor: dask-ms only infers it for names ending in '.ms',
+    # otherwise column types would follow the numpy dtypes (non-standard MS).
+    ms_writes = xds_to_table(
+        ms_datasets, ms_table_name, columns="ALL", descriptor="ms"
+    )
     # auxilary table futures creation
     spw_writes = xds_to_table(spw_datasets, spw_table_name, columns="ALL")
     ddid_writes = xds_to_table(ddid_datasets, ddid_table_name, columns="ALL")
@@ -1337,46 +1260,6 @@ def ms_create(
             dask.compute([ms_writes + spw_writes + ddid_writes] + MSTable.get_futures())
     else:
         dask.compute([ms_writes + spw_writes + ddid_writes] + MSTable.get_futures())
-    LOGGER.info("Performing finalization of UVW coordinates if needed")
-    if uvw_generator == "telescope_snapshot":
-        pass  # user has been warned about their choice -- this cannot be used when rephasing
-    elif uvw_generator == "casacore":
-        # rephasing requires us to tilt w towards the rephased point on the sphere
-        # this is also needed if we haven't generated zenithal points yet because we didn't predict
-        # a model
-        if isinstance(phase_center_policy, str):
-            fn = phase_center_policy.replace("rephase-", "")
-            fsrc = list(
-                filter(
-                    lambda x: (
-                        x["name"].upper() == fn
-                        and x["position"]["FRAME"] == "Special Body"
-                    ),
-                    read_known_phasings(),
-                )
-            )
-            is_special_body = len(fsrc) > 0
-        elif isinstance(phase_center_policy, SkyCoord):
-            is_special_body = False
-        else:
-            raise ValueError(
-                "Invalid type for phase_centre_policy - expect string or SkyCoord"
-            )
-        single_field = (
-            isinstance(phase_center_policy, SkyCoord)
-            or phase_center_policy.find("rephase-") == 0
-            or phase_center_policy == "no-rephase-obs-midpoint"
-        )
-        if not is_special_body:  # non-sidereal tracking fields have their UVW computed per timestamp due to change in RA,DEC
-            if (
-                single_field  # non-zeniths for which UVW are needed
-                or (not single_field and not fill_model)
-            ):  # zeniths not yet computed - no model predicts happened
-                fixms(ms_table_name)
-    else:
-        raise ValueError(
-            'uvw_generator expects either mode "telescope_snapshot" or "casacore"'
-        )
     end_time = time.time()
     elapsed = end_time - start_time
     LOGGER.info(
