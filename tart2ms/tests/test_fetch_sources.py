@@ -48,9 +48,13 @@ class TestFetchSourcesClient(unittest.TestCase):
                 self.assertIn("name", s)
                 self.assertIn("ra", s)
                 self.assertIn("dec", s)
+                self.assertIn("az", s)
+                self.assertIn("el", s)
                 self.assertIn("jy", s)
                 self.assertIsInstance(s["ra"], (int, float, np.floating))
                 self.assertIsInstance(s["dec"], (int, float, np.floating))
+                self.assertIsInstance(s["az"], (int, float, np.floating))
+                self.assertIsInstance(s["el"], (int, float, np.floating))
 
     def test_ra_dec_in_radians(self):
         sources, _ = _fetch_via(
@@ -99,8 +103,15 @@ class TestFetchSourcesClient(unittest.TestCase):
                 self.assertIn("jy", s)
 
     def test_elevation_filtering(self):
-        """Sources below declination threshold should be excluded."""
-        for elev in [-45.0, -30.0]:
+        """Sources below the topocentric elevation threshold should be excluded.
+
+        Note: filter_elevation is a true horizon elevation cut (deg), as used
+        by predict_model's `el` filter -- not a declination cut. (This test
+        previously asserted a declination threshold, which combined with the
+        missing 'el' key silently dropped all client-fetched GNSS sources
+        from the model and the SOURCE table.)
+        """
+        for elev in [-45.0, -30.0, 0.0]:
             sources, _ = _fetch_via(
                 downsampletimes=[self.timestamps[0]],
                 observer_lat=LAT,
@@ -108,11 +119,29 @@ class TestFetchSourcesClient(unittest.TestCase):
                 filter_elevation=elev,
                 filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
             )
+            self.assertGreater(len(sources[0]), 0,
+                               f"expected some GNSS sources above {elev} deg el")
             for s in sources[0]:
                 self.assertGreaterEqual(
-                    np.degrees(s["dec"]), elev,
-                    f"Source {s['name']} has dec={np.degrees(s['dec']):.1f} < {elev}"
+                    s["el"], elev,
+                    f"Source {s['name']} has el={s['el']:.1f} < {elev}"
                 )
+        # a near-zenith cut must shrink the source list
+        sources_low, _ = _fetch_via(
+            downsampletimes=[self.timestamps[0]],
+            observer_lat=LAT, observer_lon=LON,
+            filter_elevation=0.0,
+            filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
+        )
+        sources_high, _ = _fetch_via(
+            downsampletimes=[self.timestamps[0]],
+            observer_lat=LAT, observer_lon=LON,
+            filter_elevation=60.0,
+            filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
+        )
+        self.assertLessEqual(len(sources_high[0]), len(sources_low[0]))
+        for s in sources_high[0]:
+            self.assertGreaterEqual(s["el"], 60.0)
 
 
 if __name__ == "__main__":

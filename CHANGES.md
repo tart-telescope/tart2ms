@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **GNSS sources silently dropped from models and the SOURCE table (found while
+  profiling issue #53)**: `__fetch_sources_via_client` produced sources without
+  `az`/`el` keys and applied a declination cut masquerading as an elevation cut, so
+  `predict_model`'s `el >= 45` filter dropped every client-fetched GNSS source and
+  the SOURCE table ended up empty. Client sources now carry true topocentric Az/El
+  (from the catalogue client's `horizontal_positions`), the filter is a real
+  elevation cut, and the SOURCE table writer uses `ra`/`dec` directly when present
+  (same convention as `predict_model`, also skipping the azel2radec round trip).
+  Verified end-to-end: 108 GNSS SOURCE rows and a predicted GNSS model component
+  where there were none.
+
 - **Issue #6 (astropy "overflow encountered in double_scalars")**: documented the
   root cause in `tart2ms/tart2ms.py`. The logged `Time 5167445918.181001` value is
   the observation epoch in seconds since the MJD epoch (the MS TIME convention), not

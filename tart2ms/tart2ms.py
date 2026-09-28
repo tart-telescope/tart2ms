@@ -632,13 +632,19 @@ def ms_create(
                 continue
             for src in sources_i:
                 name = src["name"]
-                # Convert to J2000
-                direction_src = azel2radec(
-                    az=src["az"],
-                    el=src["el"],
-                    location=location,
-                    obstime=sources_obstime[database_i],
-                )
+                # Convert to J2000. If the source already has 'ra'/'dec' in
+                # radians (e.g. from tart-catalogue-client), use them directly
+                # -- same convention as predict_model -- otherwise convert
+                # from az/el.
+                if "ra" in src and "dec" in src:
+                    direction_src = [src["ra"], src["dec"]]
+                else:
+                    direction_src = azel2radec(
+                        az=src["az"],
+                        el=src["el"],
+                        location=location,
+                        obstime=sources_obstime[database_i],
+                    )
                 LOGGER.debug(
                     f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}"
                 )
@@ -1458,26 +1464,46 @@ def __fetch_sources_via_client(
 
     Uses celestial_positions to get J2000 RA/Dec directly, avoiding
     the Az/El intermediate representation and subsequent azel2radec
-    conversion in predict_model.
+    conversion in predict_model. Also computes true topocentric Az/El
+    (via the client's ECEF positions) so that elevation filtering works
+    and consumers expecting 'az'/'el' (SOURCE table writer, azel2radec
+    fallback in predict_model) can use these sources like any other.
     """
     client = CatalogueClient()
     sources = []
     for tt in downsampletimes:
         sats = client.celestial_positions(dt=tt)
-        # Return RA/Dec in radians for direct use in predict_model.
-        # Includes 'el' computed from 'dec_degrees' for elevation filtering.
+        # True topocentric az/el in degrees from the same SGP4 ECEF
+        # positions. Filtering on celestial declination here (as this
+        # function used to) is not an elevation cut and, together with
+        # the missing 'el' key, silently dropped every GNSS source from
+        # the model and the SOURCE table.
+        horiz_by_name = {
+            h["name"]: h
+            for h in client.horizontal_positions(
+                lat=observer_lat, lon=observer_lon, dt=tt,
+                min_elevation=-90.0, name_regex=None,
+            )
+        }
+        # Return RA/Dec in radians for direct use in predict_model,
+        # plus Az/El in degrees (elevation filtering + SOURCE table).
         mapped = []
         for s in sats:
+            h = horiz_by_name.get(s["name"])
+            if h is None:
+                continue
             mapped.append({
                 "name": s["name"],
                 "ra": np.radians(s["ra_hours"] * 15.0),  # hours -> degrees -> radians
                 "dec": np.radians(s["dec_degrees"]),
+                "az": h["azimuth_deg"],
+                "el": h["elevation_deg"],
                 "jy": s.get("jy", 0.0),
             })
         filtered = list(
             filter(
                 lambda s: (
-                    np.degrees(s["dec"]) >= filter_elevation
+                    s["el"] >= filter_elevation
                     and re.findall(filter_name, s.get("name", "NULLPTR"))
                 ),
                 mapped,
