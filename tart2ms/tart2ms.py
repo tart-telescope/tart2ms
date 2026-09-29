@@ -630,21 +630,32 @@ def ms_create(
         ):
             if sources_i is None:
                 continue
-            for src in sources_i:
-                name = src["name"]
-                # Convert to J2000. If the source already has 'ra'/'dec' in
-                # radians (e.g. from tart-catalogue-client), use them directly
-                # -- same convention as predict_model -- otherwise convert
-                # from az/el.
+            # Convert to J2000. Sources that already carry 'ra'/'dec' in
+            # radians (e.g. from tart-catalogue-client) are used directly --
+            # same convention as predict_model -- the rest are converted from
+            # az/el in ONE vectorized call per database (issue #53) instead
+            # of one scalar SkyCoord transform per source.
+            radec_by_idx = {}
+            azel_idx = []
+            for src_i, src in enumerate(sources_i):
                 if "ra" in src and "dec" in src:
-                    direction_src = [src["ra"], src["dec"]]
+                    radec_by_idx[src_i] = (src["ra"], src["dec"])
                 else:
-                    direction_src = azel2radec(
-                        az=src["az"],
-                        el=src["el"],
-                        location=location,
-                        obstime=sources_obstime[database_i],
-                    )
+                    azel_idx.append(src_i)
+            if azel_idx:
+                az = np.array([sources_i[i]["az"] for i in azel_idx], dtype=float)
+                el = np.array([sources_i[i]["el"] for i in azel_idx], dtype=float)
+                src_ra, src_dec = azel2radec(
+                    az=az,
+                    el=el,
+                    location=location,
+                    obstime=sources_obstime[database_i],
+                )
+                for k, src_i in enumerate(azel_idx):
+                    radec_by_idx[src_i] = (src_ra[k], src_dec[k])
+            for src_i, src in enumerate(sources_i):
+                name = src["name"]
+                direction_src = radec_by_idx[src_i]
                 LOGGER.debug(
                     f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}"
                 )
