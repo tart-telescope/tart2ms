@@ -14,7 +14,7 @@ from astropy import units as u
 from casacore.tables import table
 from astropy.constants import c
 
-from tart2ms.catalogs.catalog_reader import catalog_factory
+from tart2ms.catalogs.catalog_reader import catalog_factory, radec_rad
 from tart2ms.fixvis import progress
 
 logger = logging.getLogger("tart2ms")
@@ -87,8 +87,9 @@ def get_catalog_sources_azel(timestamps, location):
     catsources += catalog_factory.from_SUMMS(fluxlim15=0.5)
     catsources += catalog_factory.from_MKGains(fluxlim15=0.5)
     sources = []
-    ras = list(map(lambda s: s.rarad, catsources))
-    decs = list(map(lambda s: s.decrad, catsources))
+    # one vectorized fk5->icrs transform instead of one per source;
+    # numerically equivalent to [s.rarad for s in ...] (issue #53)
+    ras, decs = radec_rad(catsources)
     alts, azs = radec2azel(ras, decs, location=location, obstime=timestamps)
     for ti, tt in enumerate(timestamps):
         ttsources = []

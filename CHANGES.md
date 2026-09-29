@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Issue #53 speedups: batched azel2radec + cached catalog parsing**: the
+  az/el -> J2000 conversion in `predict_model` and the SOURCE table writer is now
+  one vectorized `azel2radec` call per source epoch instead of one scalar SkyCoord
+  transform per source (5760 -> 120 calls on the shipped 60-timestamp dataset;
+  that loop was ~70% of the `--add-model` runtime). Catalog parsing in
+  `catalogs/catalog_reader.py` is cached per (path, mtime, flux cut) and the
+  fk5->icrs transform behind the `rarad`/`decrad` accessors is memoised and
+  vectorized (`radec_rad`). Output is bit-identical for the batching change and
+  within 3e-15 rad for the vectorized catalog angles; MODEL_DATA and SOURCE
+  tables are bit-identical end-to-end on the shipped test datasets. Model-path
+  wall on the 60-timestamp test HDF5 drops 130.3 s -> 20.7 s (median-of-medians,
+  interleaved A/B on a shared host: 6.3x).
+
 - **GNSS sources silently dropped from models and the SOURCE table (found while
   profiling issue #53)**: `__fetch_sources_via_client` produced sources without
   `az`/`el` keys and applied a declination cut masquerading as an elevation cut, so
