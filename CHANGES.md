@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## v0.9.4 — Archive search, GNSS model sources, 6x faster models
 
 - **Issue #53 speedups: batched azel2radec + cached catalog parsing**: the
   az/el -> J2000 conversion in `predict_model` and the SOURCE table writer is now
