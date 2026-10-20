@@ -58,3 +58,12 @@ path = "tart2ms/__init__.py"
 include = [
     "/tart2ms",
 ]
+
+[dependency-groups]
+# The release tooling: tasks.py (`invoke version|test|release`), which runs the
+# pre-release suite, bumps the version, stamps CHANGES.md and monitors the
+# PyPI publish workflow.
+dev = [
+    "invoke>=3.0,<4",
+    "plumbum>=2.0,<3",
+]
