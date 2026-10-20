@@ -302,25 +302,21 @@ def release(c,
     v = version or _read_version()
     tag = f"v{v}"
     section = _changelog_section(v)
-    if section:
-        notes = REPO / f".release-notes-{v}.md"
-        notes.write_text(section + "\n")
-        print(f"  release notes staged from CHANGES.md ({notes.name})")
-    else:
+    if not section:
         print(f"    warning: CHANGES.md has no '## v{v}' section, so the tag "
               f"will be published without release notes (add one, or let the "
               f"default bump stamp it)")
+
+    commit = _git("rev-parse", "HEAD").strip()
+    if _tag_exists(tag):
+        print(f"=== {tag} already on origin -- verified, skipping")
+        return
 
     status = _git("status", "--porcelain").strip()
     if status:
         raise RuntimeError(
             "tree is dirty; commit the release (CHANGES.md, pyproject.toml, "
             f"CITATION.cff) first\n{status}")
-
-    commit = _git("rev-parse", "HEAD").strip()
-    if _tag_exists(tag):
-        print(f"=== {tag} already on origin -- verified, skipping")
-        return
 
     branch = _branch()
     print(f"=== tagging {tag} (commit {commit[:12]})")
@@ -336,6 +332,7 @@ def release(c,
 
     if section:
         notes = REPO / f".release-notes-{v}.md"
+        notes.write_text(section + "\n")
         local["gh"]["release", "create", tag, "-R", REPO_SLUG,
                "--title", f"tart2ms {tag}",
                "--notes-file", str(notes)] & FG
