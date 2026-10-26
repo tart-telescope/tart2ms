@@ -55,10 +55,20 @@ Homepage = "http://github.com/tart-telescope/tart2ms"
 # Fork of dask-ms with the casacure (pure Rust casacore tables) backend
 dask-ms = { git = "https://github.com/tmolteno/dask-ms", branch = "master" }
 
-[tool.hatch.version]
-path = "tart2ms/__init__.py"
-
 [tool.hatch.build.targets.sdist]
 include = [
     "/tart2ms",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "flake8>=7.1.2",
+    # Release automation (tasks.py): invoke is the task runner, plumbum the
+    # shell-command plumbing it uses for the version bump, the tag push and
+    # the CI publish wait. pytest/flake8 belong here too: without them
+    # `uv run pytest` silently falls back to whatever is on PATH (a global
+    # pytest, which cannot import the project).
+    "invoke>=3.0",
+    "plumbum>=2.0",
 ]
