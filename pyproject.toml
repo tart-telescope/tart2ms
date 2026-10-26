@@ -28,13 +28,13 @@ dependencies = [
     "tart >= 1.4.0",
     "tart_tools >= 1.4.0",
     "astropy (>=7.1.0,<9.0.0)",
-    "dask-ms (>=0.2.0,<0.3.0)",
+    "dask-ms[casacure] (>=0.2.32,<0.3.0)",
+    "casacure (>=3.8.13,<4.0.0)",
     "h5py (>=3.1.0,<4.0.0)",
     "numpy (>=1.6.0,<3.0.0)",
     "pandas (>=2.0.0,<3.0.0)",
     "requests (>=2.32.4,<3.0.0)",
     "progress (>=1.6.1,<2.0.0)",
-    "python-casacore (>=3.7.1,<4.0.0)",
     "scipy (>=1.16.1,<2.0.0)",
     "codex-africanus (>=0.4.2,<0.5)",
     "tart-catalogue-client (>=0.5.1,<0.6)"
@@ -51,8 +51,9 @@ tart2ms = "tart2ms.scripts.tart2ms:main"
 [project.urls]
 Homepage = "http://github.com/tart-telescope/tart2ms"
 
-[tool.hatch.version]
-path = "tart2ms/__init__.py"
+[tool.uv.sources]
+# Fork of dask-ms with the casacure (pure Rust casacore tables) backend
+dask-ms = { git = "https://github.com/tmolteno/dask-ms", branch = "master" }
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -60,10 +61,15 @@ include = [
 ]
 
 [dependency-groups]
-# The release tooling: tasks.py (`invoke version|test|release`), which runs the
-# pre-release suite, bumps the version, stamps CHANGES.md and monitors the
-# PyPI publish workflow.
+# The release tooling: tasks.py (`invoke version|test|release|status`), which
+# runs the pre-release suite, the lint gate and the smoke conversions, bumps
+# the version, stamps CHANGES.md and monitors the PyPI publish workflow.
+# pytest and flake8 are declared here as well: without them `uv run` falls
+# back to whatever is on PATH — a global pytest that cannot import this
+# project, which is what "7 errors during collection" turned out to be.
 dev = [
+    "pytest>=8",
+    "flake8>=7.1.2",
     "invoke>=3.0,<4",
     "plumbum>=2.0,<3",
 ]

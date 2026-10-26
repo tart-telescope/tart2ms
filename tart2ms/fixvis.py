@@ -8,11 +8,11 @@ import logging
 import sys
 
 import numpy as np
+import erfa
+from astropy.time import Time
+from casacore.tables import table as tbl
 from progress.bar import FillingSquaresBar as bar
-from pyrap import quanta
-from pyrap.measures import measures
-from pyrap.quanta import quantity
-from pyrap.tables import table as tbl
+from scipy.constants import c as SPEED_OF_LIGHT
 
 logger = logging.getLogger("tart2ms")
 
@@ -109,6 +109,79 @@ def dense2sparse_uvw(a1, a2, time, ddid, padded_uvw, ack=True):
     return new_uvw
 
 
+def _check_units(stopctr_units, stopctr_epoch, time_TZ, time_unit, posframe, posunits):
+    if [str(x).lower() for x in stopctr_units] != ["rad", "rad"]:
+        raise ValueError(f"Unsupported phase centre units {stopctr_units}")
+    if str(stopctr_epoch).upper() not in ("J2000", "ICRS"):
+        raise ValueError(f"Unsupported phase centre frame {stopctr_epoch}")
+    if str(time_TZ).upper() != "UTC" or str(time_unit).lower() != "s":
+        raise ValueError(f"Unsupported time reference {time_TZ} [{time_unit}]")
+    if str(posframe).upper() != "ITRF" or [str(x).lower() for x in posunits] != ["m"] * 3:
+        raise ValueError(f"Unsupported station position frame {posframe} {posunits}")
+
+
+def itrf_to_celestial(time):
+    """
+    Rotation matrices taking ITRF vectors to celestial (GCRS ~ J2000/ICRS)
+    axes for each MS epoch in ``time`` (UTC MJD seconds).
+    Returns an array of shape (time.size, 3, 3).
+    """
+    t = Time(np.atleast_1d(time) / 86400.0, format="mjd", scale="utc")
+    tt, ut1 = t.tt, t.ut1
+    # erfa.c2t06a gives GCRS -> ITRS; polar motion (<1 arcsec) is ignored
+    c2t = erfa.c2t06a(tt.jd1, tt.jd2, ut1.jd1, ut1.jd2, 0.0, 0.0)
+    return np.swapaxes(c2t, -1, -2)
+
+
+def uvw_basis(phase_dirs):
+    """
+    Rows are the u, v, w unit vectors (celestial axes) for each
+    (ra, dec) phase direction in radians. Returns shape (ndir, 3, 3).
+    """
+    phase_dirs = np.asarray(phase_dirs, dtype=np.float64).reshape(-1, 2)
+    ra, dec = phase_dirs[:, 0], phase_dirs[:, 1]
+    sa, ca = np.sin(ra), np.cos(ra)
+    sd, cd = np.sin(dec), np.cos(dec)
+    zero = np.zeros_like(ra)
+    return np.stack(
+        [
+            np.stack([-sa, ca, zero], axis=-1),
+            np.stack([-sd * ca, -sd * sa, cd], axis=-1),
+            np.stack([cd * ca, cd * sa, sd], axis=-1),
+        ],
+        axis=1,
+    )
+
+
+def baseline_uvw(station_ECEF, time, a1, a2, phase_dirs, dir_index=None):
+    """
+    Vectorized UVW for arbitrary (time, a1, a2) rows.
+
+    station_ECEF: ITRF station coordinates (na, 3) in metres
+    time: per-row UTC epoch in MJD seconds
+    a1, a2: per-row antenna indices
+    phase_dirs: (ndir, 2) phase centres (ra, dec) in radians
+    dir_index: per-row index into phase_dirs (defaults to 0)
+
+    Uses the same convention as synthesize_uvw: the baseline is
+    station[min(a1, a2)] - station[max(a1, a2)].
+    """
+    station_ECEF = np.asarray(station_ECEF, dtype=np.float64)
+    time = np.asarray(time, dtype=np.float64)
+    a1 = np.asarray(a1)
+    a2 = np.asarray(a2)
+    if dir_index is None:
+        dir_index = np.zeros(time.size, dtype=int)
+    unique_time, time_index = np.unique(time, return_inverse=True)
+    rot = itrf_to_celestial(unique_time)  # (ntime, 3, 3)
+    lo = np.minimum(a1, a2)
+    hi = np.maximum(a1, a2)
+    bl_itrf = station_ECEF[lo] - station_ECEF[hi]  # (nrow, 3)
+    bl_cel = np.einsum("rij,rj->ri", rot[time_index], bl_itrf)
+    basis = uvw_basis(phase_dirs)
+    return np.einsum("rij,rj->ri", basis[np.asarray(dir_index)], bl_cel)
+
+
 def synthesize_uvw(
     station_ECEF,
     time,
@@ -142,79 +215,26 @@ def synthesize_uvw(
         }
     Note: input and output antenna indexes may not have the same
           order or be flipped in 1 to 2 index
-    Note: This operation CANNOT be applied blockwise due
-          to a casacore.measures threadsafety issue
     """
     assert time.size == a1.size
     assert a1.size == a2.size
+    _check_units(stopctr_units, stopctr_epoch, time_TZ, time_unit, posframe, posunits)
 
     ants = np.concatenate((a1, a2))
-    unique_ants = np.arange(np.max(ants) + 1)
-    unique_time = np.unique(time)
-    na = unique_ants.size
+    na = np.max(ants) + 1
     nbl = na * (na - 1) // 2 + na
+    unique_time = np.unique(time)
     ntime = unique_time.size
 
     # keep a full uvw array for all antennae - including those
     # dropped by previous calibration and CASA splitting
-    padded_uvw = np.zeros((ntime * nbl, 3), dtype=np.float64)
     antindices = np.stack(np.triu_indices(na, 0), axis=1)
     padded_time = unique_time.repeat(nbl)
     padded_a1 = np.tile(antindices[:, 0], (1, ntime)).ravel()
     padded_a2 = np.tile(antindices[:, 1], (1, ntime)).ravel()
-
-    dm = measures()
-    epoch = dm.epoch(time_TZ, quantity(time[0], time_unit))
-    refdir = dm.direction(
-        stopctr_epoch,
-        quantity(phase_ref[0, 0], stopctr_units[0]),
-        quantity(phase_ref[0, 1], stopctr_units[1]),
+    padded_uvw = baseline_uvw(
+        station_ECEF, padded_time, padded_a1, padded_a2, np.asarray(phase_ref)[:1]
     )
-    obs = dm.position(
-        posframe,
-        quantity(station_ECEF[0, 0], posunits[0]),
-        quantity(station_ECEF[0, 1], posunits[1]),
-        quantity(station_ECEF[0, 2], posunits[2]),
-    )
-
-    # Pre-build vectorized baseline: all antennas paired with reference (antenna 0).
-    # The ITRF offset vectors are static; call to_uvw once per timestamp (not per antenna).
-    dm.do_frame(obs)
-    dm.do_frame(refdir)
-    dm.do_frame(epoch)
-
-    ref_pos = station_ECEF[0]
-    x_pairs = np.column_stack([station_ECEF[:, 0], np.full(na, ref_pos[0])]).ravel()
-    y_pairs = np.column_stack([station_ECEF[:, 1], np.full(na, ref_pos[1])]).ravel()
-    z_pairs = np.column_stack([station_ECEF[:, 2], np.full(na, ref_pos[2])]).ravel()
-
-    baseline_measure = dm.baseline(
-        posframe,
-        quantity(x_pairs, posunits[0]),
-        quantity(y_pairs, posunits[1]),
-        quantity(z_pairs, posunits[2]),
-    )
-
-    if ack:
-        p = progress("Calculating UVW", max=unique_time.size)
-    for ti, t in enumerate(unique_time):
-        if ack:
-            p.next()
-        dm.do_frame(dm.epoch(time_TZ, quantity(t, time_unit)))
-
-        # Single vectorized call for all antenna UVW positions
-        result = dm.to_uvw(baseline_measure)
-        xyz_vals = np.array(result["xyz"].get_value()).reshape(na, 6)
-        station_uv = xyz_vals[:, 0:3]
-
-        # Vectorized baseline computation. antindices is (nbl, 2) with the
-        # bl-th baseline (a1, a2) -> station_uv[a1] - station_uv[a2].
-        # Same convention as in CASA (Convention for UVW calculations in
-        # CASA, Rau 2013). Broadcasting over all baselines avoids the
-        # per-baseline Python loop and produces identical results.
-        bl_a1 = antindices[:, 0]
-        bl_a2 = antindices[:, 1]
-        padded_uvw[ti * nbl : (ti + 1) * nbl, :] = station_uv[bl_a1] - station_uv[bl_a2]
 
     return dict(
         zip(
@@ -229,56 +249,43 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
     Rephasor operator
     -- rephases a field to a new phase centre
     freq - in Hz
-    pos - tupple containing degree coordinates for RA and Dec for the epoch under consideration
+    pos - (RA, Dec) degree coordinates of the new phase centre for the epoch under
+          consideration, either a single pair (shape 2) or one pair per field
+          (shape nfield x 2, indexed by field id)
     refdir - array of tuples with original field phase centres in RA and dec at the same epoch as pos (degrees), one per field
     phasesign - should be -1 for the NRAO baseline conventions
     sel - selects a portion of data in uvw, field_ids and vis
     """
     vis_rephase = np.zeros_like(vis)
-    uniq_fields = np.unique(field_ids[sel])
-    if refdir.shape[0] < uniq_fields.max() if uniq_fields.size > 0 else 0:
-        raise ValueError("Must have at least as many ref positions as unique fields")
-    if refdir.shape[1] != 2:
+    pos = np.asarray(pos, dtype=np.float64)
+    refdir = np.asarray(refdir, dtype=np.float64)
+    if refdir.ndim != 2 or refdir.shape[1] != 2:
         raise ValueError("ref must be shape nfield x 2")
-    if pos.size != 2 and pos.shape[0] != 2:
-        raise ValueError("pos must be shape 2")
+    if pos.shape != (2,) and (pos.ndim != 2 or pos.shape[1] != 2):
+        raise ValueError("pos must be shape 2 or nfield x 2")
     if uvw.shape[0] != vis.shape[0]:
         raise ValueError("UVW rows must be the same as vis rows")
     if field_ids.shape[0] != vis.shape[0]:
         raise ValueError("FIELD_ID rows must be the same as vis rows")
-    for ifid, fid in enumerate(uniq_fields):
-        selfid = np.logical_and(field_ids == fid, sel)
-        nrowsel = np.sum(selfid)
-        cos = np.cos
-        sin = np.sin
-        sqrt = np.sqrt
-        ra, dec = np.deg2rad(pos)
-        ra0, dec0 = np.deg2rad(refdir[fid])
-        d_ra = ra - ra0
-        d_dec = dec
-        d_decp = dec0
-        c_d_dec = cos(d_dec)
-        s_d_dec = sin(d_dec)
-        s_d_ra = sin(d_ra)
-        c_d_ra = cos(d_ra)
-        c_d_decp = cos(d_decp)
-        s_d_decp = sin(d_decp)
-        ll = c_d_dec * s_d_ra
-        mm = s_d_dec * c_d_decp - c_d_dec * s_d_decp * c_d_ra
-        nn = s_d_dec * s_d_decp + c_d_dec * c_d_decp * c_d_ra - 1.0
+    rows = np.flatnonzero(sel)
+    fid = field_ids[rows]
+    if fid.size > 0 and refdir.shape[0] <= fid.max():
+        raise ValueError("Must have at least as many ref positions as unique fields")
 
-        wl = quanta.constants["c"].get_value() / freq  # shape (nfreq,)
-        # Use broadcasting instead of creating full nrowsel x nfreq x 3 copies
-        # uvw has shape (nrowsel, 3), wl has shape (nfreq,)
-        uvw_sel = uvw[selfid, :]  # (nrowsel, 3)
-        uu = uvw_sel[:, 0:1] / wl[None, :]  # (nrowsel, nfreq) via broadcasting
-        vv = uvw_sel[:, 1:2] / wl[None, :]
-        ww = uvw_sel[:, 2:3] / wl[None, :]
+    # Per-row direction cosines of the new centre relative to the row's field centre
+    ra, dec = np.deg2rad(pos if pos.ndim == 1 else pos[fid]).T
+    ra0, dec0 = np.deg2rad(refdir[fid]).T
+    d_ra = ra - ra0
+    ll = np.cos(dec) * np.sin(d_ra)
+    mm = np.sin(dec) * np.cos(dec0) - np.cos(dec) * np.sin(dec0) * np.cos(d_ra)
+    nn = np.sin(dec) * np.sin(dec0) + np.cos(dec) * np.cos(dec0) * np.cos(d_ra) - 1.0
 
-        x = np.exp(phasesign * 2.0j * np.pi * (uu * ll + vv * mm + ww * nn))
-        ncorr = vis.shape[2]
-        # x has shape (nrowsel, nfreq) -- broadcast to (nrowsel, nfreq, ncorr)
-        vis_rephase[selfid, :, :] = vis[selfid, :, :] * x[:, :, None]
+    # Path difference in metres per row, then phase per (row, freq)
+    uvw_sel = uvw[rows, :]
+    delay = uvw_sel[:, 0] * ll + uvw_sel[:, 1] * mm + uvw_sel[:, 2] * nn
+    inv_wl = np.asarray(freq, dtype=np.float64) / SPEED_OF_LIGHT  # shape (nfreq,)
+    x = np.exp(phasesign * 2.0j * np.pi * delay[:, None] * inv_wl[None, :])
+    vis_rephase[rows, :, :] = vis[rows, :, :] * x[:, :, None]
 
     return vis_rephase
 
@@ -286,12 +293,9 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
 def fixms(msname, ack=True):
     """
     Runs an operation similar to the CASA fixvis task
-    Recomputes UVW coordinates with casacore for the predicted
+    Recomputes UVW coordinates for the predicted
     az-elev delay projections given a dataset with antenna ICRS
     positions and a time centroid column.
-
-    Note: This operation CANNOT be applied blockwise due
-    to a casacore.measures threadsafety issue
     """
     with tbl(msname + "::ANTENNA", ack=False) as t:
         apos = t.getcol("POSITION")
@@ -317,44 +321,17 @@ def fixms(msname, ack=True):
     with tbl(msname, ack=False) as t:
         a1 = t.getcol("ANTENNA1")
         a2 = t.getcol("ANTENNA2")
-        uvw = t.getcol("UVW")
         field_id = t.getcol("FIELD_ID")
-        ddid = t.getcol("DATA_DESC_ID")
         time = t.getcol("TIME_CENTROID")
         timecoldesc = t.getcoldesc("TIME_CENTROID")
         time_TZ = timecoldesc["keywords"]["MEASINFO"]["Ref"]
         time_unit = timecoldesc["keywords"]["QuantumUnits"][0]
 
-    logger.info("Computing UVW coordinates for output dataset... WAIT")
-    new_uvw = np.zeros_like(uvw, dtype=uvw.dtype)
-    n_fields = len(fnames)
-    for fi in range(n_fields):
-        fsel = field_id == fi
-        padded_uvw = synthesize_uvw(
-            station_ECEF=apos,
-            time=time[fsel],
-            a1=a1[fsel],
-            a2=a2[fsel],
-            phase_ref=field_stop_ctrs[fi],
-            stopctr_units=stopctr_units,
-            time_TZ=time_TZ,
-            time_unit=time_unit,
-            stopctr_epoch=stopctr_epoch,
-            posframe=posframe,
-            posunits=posunits,
-            ack=ack,
-        )
-        new_uvw[fsel] = dense2sparse_uvw(
-            a1=a1[fsel],
-            a2=a2[fsel],
-            time=time[fsel],
-            ddid=ddid[fsel],
-            padded_uvw=padded_uvw["UVW"],
-            ack=ack,
-        )
-        logger.info(
-            f"\t {fi + 1} / {n_fields} field {fnames[fi]} {field_stop_ctrs[fi]} completed"
-        )
+    _check_units(stopctr_units, stopctr_epoch, time_TZ, time_unit, posframe, posunits)
+    logger.info(f"Computing UVW coordinates for {len(fnames)} field(s)")
+    new_uvw = baseline_uvw(
+        apos, time, a1, a2, field_stop_ctrs[:, 0, :], dir_index=field_id
+    )
 
     logger.info("Writing computed UVW coordinates to output dataset")
 

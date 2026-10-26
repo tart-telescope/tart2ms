@@ -51,11 +51,8 @@ def radec2azel(ra, dec, location, obstime):
     return direction_src
 
 def get_array_location(ms_file):
-    ms = table(ms_file)
-    ant = table(ms.getkeyword("ANTENNA"))
-    ant_p = ant.getcol("POSITION")
-    ms.unlock()
-    ms.close()
+    with table(f"{ms_file}::ANTENNA", ack=False) as ant:
+        ant_p = ant.getcol("POSITION")
     p = np.mean(ant_p, axis=0)
     loc = EarthLocation.from_geocentric(p[0], p[1], p[2], 'm')
     geo = loc.to_geodetic(ellipsoid='WGS84')
@@ -67,11 +64,8 @@ def get_array_location(ms_file):
             }
 
 def get_observation_time(ms_file):
-    ms = table(ms_file)
-    ant = table(ms.getkeyword("ANTENNA"))
-    ant_p = ant.getcol("POSITION")
-    ms.unlock()
-    ms.close()
+    with table(f"{ms_file}::ANTENNA", ack=False) as ant:
+        ant_p = ant.getcol("POSITION")
     p = np.mean(ant_p, axis=0)
     loc = EarthLocation.from_geocentric(p[0], p[1], p[2], 'm')
     geo = loc.to_geodetic(ellipsoid='WGS84')

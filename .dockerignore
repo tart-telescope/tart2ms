@@ -1,0 +1,14 @@
+# Build context is the repository root (see docker/docker-compose.yml);
+# the image only needs pyproject.toml, uv.lock, README.md and tart2ms/.
+.git
+.venv
+.claude
+.pytest_cache
+.ruff_cache
+dist
+examples
+test_data
+**/__pycache__
+**/*.ms
+*.fits
+*.log

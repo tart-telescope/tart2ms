@@ -35,21 +35,16 @@ def read_ms(
     channel = np.array(channel)
     logger.info(f"Reading channel {channel}")
     logger.debug(f"colnames{ms.colnames()}")
-    logger.debug(f"keywordnames{ms.keywordnames()}")
-    logger.debug(f"fields{ms.fieldnames()}")
+    logger.debug(f"keywordnames{list(ms.getkeywords())}")
 
-    ant = table(ms.getkeyword("ANTENNA"), ack=False)
+    ant = table(f"{ms_file}::ANTENNA", ack=False)
     ant_p = ant.getcol("POSITION")
     logger.debug("Antenna Positions {}".format(ant_p.shape))
 
     # Now use TAQL to select only good data from the correct field
-    subt = ms.query(
-        f"FIELD_ID=={field_id}",
-        sortlist="ARRAY_ID",
-        columns=f"TIME, {ms_column}, UVW, ANTENNA1, ANTENNA2, FLAG",
-    )
+    subt = ms.query(f"FIELD_ID=={field_id}")
 
-    fields = table(subt.getkeyword("FIELD"), ack=False)
+    fields = table(f"{ms_file}::FIELD", ack=False)
     # field columns ['DELAY_DIR', 'PHASE_DIR', 'REFERENCE_DIR', 'CODE', 'FLAG_ROW', 'NAME', 'NUM_POLY', 'SOURCE_ID', 'TIME']
     phase_dir = fields.getcol("PHASE_DIR")[field_id][0]
     name = fields.getcol("NAME")[field_id]
@@ -89,13 +84,10 @@ def read_ms(
 
     try:
         # Deal with the case where WEIGHT_SPECTRUM is not present.s
-        subt_ws = ms.query(
-            f"FIELD_ID=={field_id}", sortlist="ARRAY_ID", columns="WEIGHT_SPECTRUM"
-        )
-        weight_spectrum = subt_ws.getcol("WEIGHT_SPECTRUM")[snapshot_indices, :, pol][
+        weight_spectrum = subt.getcol("WEIGHT_SPECTRUM")[snapshot_indices, :, pol][
             :, channel
         ]
-    except RuntimeError as e:
+    except (RuntimeError, KeyError, ValueError) as e:
         logger.debug(f"{e}")
         weight_spectrum = np.ones_like(raw_vis)
 
@@ -106,7 +98,7 @@ def read_ms(
     ant2 = ant2[snapshot_indices]
 
     # Create datasets representing each row of the spw table
-    spw = table(ms.getkeyword("SPECTRAL_WINDOW"), ack=False)
+    spw = table(f"{ms_file}::SPECTRAL_WINDOW", ack=False)
     logger.debug(spw.colnames())
 
     frequencies = spw.getcol("CHAN_FREQ")[0]
@@ -114,7 +106,7 @@ def read_ms(
     frequency = frequencies[channel]
     logger.debug(f"Frequencies = {frequencies.shape}")
     logger.debug(f"Frequency = {frequency}")
-    logger.debug(f"NUM_CHAN = {np.array(spw.NUM_CHAN[0])}")
+    logger.debug(f"NUM_CHAN = {spw.getcol('NUM_CHAN')[0]}")
 
     #
     #   Now calculate which indices we should use to get the required number of
