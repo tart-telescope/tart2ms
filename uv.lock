@@ -989,7 +989,7 @@ wheels = [
 
 [[package]]
 name = "tart2ms"
-version = "0.9.3"
+version = "0.9.4"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },
@@ -1036,8 +1036,8 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "flake8", specifier = ">=7.1.2" },
-    { name = "invoke", specifier = ">=3.0" },
-    { name = "plumbum", specifier = ">=2.0" },
+    { name = "invoke", specifier = ">=3.0,<4" },
+    { name = "plumbum", specifier = ">=2.0,<3" },
     { name = "pytest", specifier = ">=8" },
 ]
 
