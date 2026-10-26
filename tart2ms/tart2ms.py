@@ -45,7 +45,7 @@ from .ms_helper import (
     get_solar_system_bodies,
     predict_model,
 )
-from .util import rayleigh_criterion, read_known_phasings
+from .util import gain_flagged_antennas, rayleigh_criterion, read_known_phasings
 
 DEFAULT_CHUNK_SIZE = 100000
 DEFAULT_SIGMA = 1.0
@@ -69,6 +69,15 @@ from tart_client import CatalogueClient
 
 from astropy.utils.iers import conf as iers_conf
 # Allow interpolation beyond 30-day IERS table validity
+#
+# Note (issue #6): on astropy <= 5.0.0 this setting made the first UTC <-> TT
+# scale conversion compute TimeDelta(180 - np.finfo(float).max) inside
+# LeapSeconds.auto_open (astropy/utils/iers/iers.py). That ~1.8e308 value trips
+# numpy "overflow encountered in double_scalars" RuntimeWarnings in
+# astropy.time.utils.split shortly after the "Time ..." log line. The warnings
+# are non-catastrophic (the times themselves are exact) and were fixed upstream
+# in astropy 5.0.1 (astropy/astropy#12713); the astropy version required here
+# is not affected.
 iers_conf.auto_max_age = None
 
 # ---------------------------------------------------------------------------
@@ -236,6 +245,18 @@ def timestamps_to_ms_epoch(t_stamps):
     return ((t.jd1 - 2400000.5) + t.jd2) * 86400.0
 
 
+def __baseline_flag_rows(baselines, flagged_antennas):
+    """Return a boolean array marking the visibility rows whose baseline
+    touches any of the given antennas (e.g. zeroed-gain antennas that must
+    be flagged, issue #54)."""
+    bl = np.asarray(baselines)
+    row_flags = np.zeros(bl.shape[0], dtype=bool)
+    if len(flagged_antennas) > 0:
+        row_flags |= np.isin(bl[:, 0], flagged_antennas)
+        row_flags |= np.isin(bl[:, 1], flagged_antennas)
+    return row_flags
+
+
 def ms_create(
     ms_table_name,
     info,
@@ -255,6 +276,7 @@ def ms_create(
     chunks_out=DEFAULT_CHUNK_SIZE,
     skip_sources_keywordtbl=False,
     cat_name_prefix="model_sources_",
+    flag_rows=None,
 ):
     """Create a Measurement Set from some TART observations
 
@@ -282,6 +304,10 @@ def ms_create(
                 "sampling_frequency": 16368000.0
             }
         },
+
+    flag_rows : array of bool, optional
+        One entry per visibility row. Rows marked True are written out with
+        FLAG set (e.g. baselines touching antennas with zeroed gains).
 
     Returns
     -------
@@ -619,15 +645,32 @@ def ms_create(
         ):
             if sources_i is None:
                 continue
-            for src in sources_i:
-                name = src["name"]
-                # Convert to J2000
-                direction_src = azel2radec(
-                    az=src["az"],
-                    el=src["el"],
+            # Convert to J2000. Sources that already carry 'ra'/'dec' in
+            # radians (e.g. from tart-catalogue-client) are used directly --
+            # same convention as predict_model -- the rest are converted from
+            # az/el in ONE vectorized call per database (issue #53) instead
+            # of one scalar SkyCoord transform per source.
+            radec_by_idx = {}
+            azel_idx = []
+            for src_i, src in enumerate(sources_i):
+                if "ra" in src and "dec" in src:
+                    radec_by_idx[src_i] = (src["ra"], src["dec"])
+                else:
+                    azel_idx.append(src_i)
+            if azel_idx:
+                az = np.array([sources_i[i]["az"] for i in azel_idx], dtype=float)
+                el = np.array([sources_i[i]["el"] for i in azel_idx], dtype=float)
+                src_ra, src_dec = azel2radec(
+                    az=az,
+                    el=el,
                     location=location,
                     obstime=sources_obstime[database_i],
                 )
+                for k, src_i in enumerate(azel_idx):
+                    radec_by_idx[src_i] = (src_ra[k], src_dec[k])
+            for src_i, src in enumerate(sources_i):
+                name = src["name"]
+                direction_src = radec_by_idx[src_i]
                 LOGGER.debug(
                     f"SOURCE: {name}, timestamp: {timestamps}, dir: {direction_src}"
                 )
@@ -820,6 +863,15 @@ def ms_create(
         flag_categories = da.zeros(
             (row, 1, chan, corr), chunks=(chunks["row"], 1, chan, corr), dtype=bool
         )
+        flag_data = np.zeros((row, chan, corr), dtype=np.bool_)
+        if flag_rows is not None:
+            flag_rows = np.asarray(flag_rows, dtype=np.bool_)
+            if flag_rows.shape[0] != row:
+                raise RuntimeError(
+                    f"Expected one flag entry per visibility row, "
+                    f"got {flag_rows.shape[0]} for {row} rows"
+                )
+            flag_data[flag_rows] = True
 
         # Create dask ddid column
         dask_ddid = da.full(row, ddid, chunks=chunks["row"], dtype=np.int32)
@@ -1183,7 +1235,19 @@ def ms_create(
 
         main_table = {
             "DATA": (dims, dask_data),
-            "FLAG": (dims, __row_const(False, bool, (chan, corr))),
+            # FLAG keeps both sides of this merge: master's zero-gain baseline
+            # flagging (flag_data, issue #54) needs a per-row column, while
+            # this branch's ms_create speedup made every constant column lazy
+            # via __row_const. flag_data is already materialised numpy, so
+            # `.any()` decides cheaply: rows flagged -> real per-row column,
+            # nothing flagged -> the lazy constant (same values, no
+            # allocation, no regression to the 33s -> 2s path).
+            "FLAG": (
+                dims,
+                da.from_array(flag_data, chunks=(chunks["row"], chan, corr))
+                if flag_data.any()
+                else __row_const(False, bool, (chan, corr)),
+            ),
             "TIME": (("row",), da.from_array(timems, chunks=row_chunks)),
             "TIME_CENTROID": ("row", da.from_array(timems, chunks=row_chunks)),
             "WEIGHT": (("row", "corr"), __row_const(DEFAULT_WEIGHT, np.float32, (corr,))),
@@ -1307,26 +1371,46 @@ def __fetch_sources_via_client(
 
     Uses celestial_positions to get J2000 RA/Dec directly, avoiding
     the Az/El intermediate representation and subsequent azel2radec
-    conversion in predict_model.
+    conversion in predict_model. Also computes true topocentric Az/El
+    (via the client's ECEF positions) so that elevation filtering works
+    and consumers expecting 'az'/'el' (SOURCE table writer, azel2radec
+    fallback in predict_model) can use these sources like any other.
     """
     client = CatalogueClient()
     sources = []
     for tt in downsampletimes:
         sats = client.celestial_positions(dt=tt)
-        # Return RA/Dec in radians for direct use in predict_model.
-        # Includes 'el' computed from 'dec_degrees' for elevation filtering.
+        # True topocentric az/el in degrees from the same SGP4 ECEF
+        # positions. Filtering on celestial declination here (as this
+        # function used to) is not an elevation cut and, together with
+        # the missing 'el' key, silently dropped every GNSS source from
+        # the model and the SOURCE table.
+        horiz_by_name = {
+            h["name"]: h
+            for h in client.horizontal_positions(
+                lat=observer_lat, lon=observer_lon, dt=tt,
+                min_elevation=-90.0, name_regex=None,
+            )
+        }
+        # Return RA/Dec in radians for direct use in predict_model,
+        # plus Az/El in degrees (elevation filtering + SOURCE table).
         mapped = []
         for s in sats:
+            h = horiz_by_name.get(s["name"])
+            if h is None:
+                continue
             mapped.append({
                 "name": s["name"],
                 "ra": np.radians(s["ra_hours"] * 15.0),  # hours -> degrees -> radians
                 "dec": np.radians(s["dec_degrees"]),
+                "az": h["azimuth_deg"],
+                "el": h["elevation_deg"],
                 "jy": s.get("jy", 0.0),
             })
         filtered = list(
             filter(
                 lambda s: (
-                    np.degrees(s["dec"]) >= filter_elevation
+                    s["el"] >= filter_elevation
                     and re.findall(filter_name, s.get("name", "NULLPTR"))
                 ),
                 mapped,
@@ -1443,6 +1527,7 @@ def ms_from_hdf5(
     all_times = []
     all_vis = []
     all_baselines = []
+    all_flag_rows = []
     ant_pos_orig = None
     orig_dico_info = None
     LOGGER.info("Will process HDF5 file: ")
@@ -1538,6 +1623,16 @@ def ms_from_hdf5(
             gains = h5f["gains"][:]
             phases = h5f["phases"][:]
 
+            # Antennas with zeroed gains are switched off -- flag their
+            # baselines before applycal can mask the problem (issue #54)
+            flagged_antennas = gain_flagged_antennas(gains)
+            if flagged_antennas.size > 0:
+                LOGGER.warning(
+                    f"Zero or non-finite gains for antenna(s) "
+                    f"{flagged_antennas.tolist()} in '{h5}' -- flagging all "
+                    f"baselines involving these antennas"
+                )
+
             hdf_timestamps = h5f["timestamp"]
 
             # Some HDF5 files store timestamps without timezone info.
@@ -1580,6 +1675,7 @@ def ms_from_hdf5(
                 for bl in baselines:
                     all_baselines.append(bl)
                 all_times.append(ts)
+                all_flag_rows.append(__baseline_flag_rows(baselines, flagged_antennas))
             if ts_this_h5 == 0:
                 p.next()
                 continue
@@ -1630,6 +1726,7 @@ def ms_from_hdf5(
         write_extragalactic_catalogs=write_extragalactic_catalogs,
         chunks_out=chunks_out,
         cat_name_prefix=cat_name_prefix,
+        flag_rows=np.concatenate(all_flag_rows) if all_flag_rows else None,
     )
 
 
@@ -1678,6 +1775,7 @@ def ms_from_json(
     all_sources = []
     all_sources_timestamps = []
     all_baselines = []
+    all_flag_rows = []
     ant_pos_orig = None
     orig_dico_info = None
     tscount = 0
@@ -1688,6 +1786,15 @@ def ms_from_json(
         config = settings.from_api_json(info["info"], ant_pos)
         gains = np.array(jdi["gains"]["gain"])
         phases = np.array(jdi["gains"]["phase_offset"])
+        # Antennas with zeroed gains are switched off -- flag their
+        # baselines before applycal can mask the problem (issue #54)
+        flagged_antennas = gain_flagged_antennas(gains)
+        if flagged_antennas.size > 0:
+            LOGGER.warning(
+                f"Zero or non-finite gains for antenna(s) "
+                f"{flagged_antennas.tolist()} -- flagging all baselines "
+                f"involving these antennas"
+            )
         if not applycal:
             gains[...] = 1.0
             phases[...] = 0.0
@@ -1802,6 +1909,7 @@ def ms_from_json(
             for bl in baselines:
                 all_baselines.append(bl)
             all_times.append(timestamp)
+            all_flag_rows.append(__baseline_flag_rows(baselines, flagged_antennas))
         p.next()
     LOGGER.info("<Done>")
     if tscount == 0:
@@ -1841,4 +1949,5 @@ def ms_from_json(
         write_extragalactic_catalogs=write_extragalactic_catalogs,
         chunks_out=chunks_out,
         cat_name_prefix=cat_name_prefix,
+        flag_rows=np.concatenate(all_flag_rows) if all_flag_rows else None,
     )

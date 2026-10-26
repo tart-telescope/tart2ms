@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tart2ms"
-version = '0.9.3'
+version = '0.9.4'
 description = "Convert TART observation data to Measurement Sets"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -61,14 +61,15 @@ include = [
 ]
 
 [dependency-groups]
+# The release tooling: tasks.py (`invoke version|test|release|status`), which
+# runs the pre-release suite, the lint gate and the smoke conversions, bumps
+# the version, stamps CHANGES.md and monitors the PyPI publish workflow.
+# pytest and flake8 are declared here as well: without them `uv run` falls
+# back to whatever is on PATH — a global pytest that cannot import this
+# project, which is what "7 errors during collection" turned out to be.
 dev = [
     "pytest>=8",
     "flake8>=7.1.2",
-    # Release automation (tasks.py): invoke is the task runner, plumbum the
-    # shell-command plumbing it uses for the version bump, the tag push and
-    # the CI publish wait. pytest/flake8 belong here too: without them
-    # `uv run pytest` silently falls back to whatever is on PATH (a global
-    # pytest, which cannot import the project).
-    "invoke>=3.0",
-    "plumbum>=2.0",
+    "invoke>=3.0,<4",
+    "plumbum>=2.0,<3",
 ]

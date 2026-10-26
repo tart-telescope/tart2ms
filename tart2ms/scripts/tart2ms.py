@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import shutil
+import tempfile
 import time
 from datetime import datetime as dt
 
@@ -17,6 +18,48 @@ from tart2ms.catalogs.catalog_reader import catalog_factory
 from tart2ms.tart2ms import DEFAULT_CHUNK_SIZE
 
 logger = logging.getLogger("tart2ms")
+
+
+def download_archive_files(queries, out_dir):
+    """Download HDF5 visibility files matching the given TART online archive
+    queries ('<Name>:START:INTERVAL:END', see util.parse_archive_query) into
+    out_dir. Returns the downloaded file names in chronological order
+    (per query).
+    """
+    try:
+        from tart_tools.archive_handler import handle_archive_request
+    except ImportError as e:
+        raise RuntimeError(
+            "--archive-search requires the 'minio' package to access the TART "
+            "online archive (pip install minio)"
+        ) from e
+    files = []
+    for qi, query in enumerate(queries):
+        name, start_spec, interval, end_spec = util.parse_archive_query(query)
+        start_utc, end_utc = util.archive_query_window(start_spec, end_spec)
+        duration_min = (end_utc - start_utc).total_seconds() / 60.0
+        # The archive holds roughly one visibility file per minute, so the
+        # requested sampling interval translates to a request for
+        # duration/interval observations (interval <= 1 min keeps everything)
+        n_obs = -1 if interval <= 1.0 else max(int(round(duration_min / interval)), 1)
+        logger.info(
+            f"Searching TART archive '{name}' from {start_utc.isoformat()} to "
+            f"{end_utc.isoformat()} (sampling interval {interval} min)"
+        )
+        before = set(os.listdir(out_dir))
+        handle_archive_request(
+            target=name,
+            num_observations=n_obs,
+            output_dir=out_dir,
+            start_str=start_utc.isoformat(),
+            duration_str=str(duration_min),
+            file_prefix=f"q{qi}_{name}_",
+        )
+        new_files = sorted(set(os.listdir(out_dir)) - before)
+        if not new_files:
+            logger.warning(f"No archive files found for query '{query}'")
+        files += [os.path.join(out_dir, fn) for fn in new_files]
+    return files
 
 
 def main():
@@ -37,6 +80,20 @@ def main():
         default=None,
         nargs="*",
         help="Visibility hdf5 file (One minutes worth of visibility data).",
+    )
+    parser.add_argument(
+        "--archive-search",
+        required=False,
+        default=None,
+        nargs="*",
+        help="Query hdf5 files from the TART online archive and convert them. "
+        "Each query has the form '<Name>:START:INTERVAL:END' where <Name> is the "
+        "telescope name in the archive bucket (e.g. signal, rhodes, stellenbosch), "
+        "START and END are either minute offsets relative to now (e.g. -10 for ten "
+        "minutes ago, 0 for now) or ISO-8601 timestamps, and INTERVAL is the "
+        "sampling interval in minutes. "
+        "(-10:1:0 last ten minutes interval 1 min) -100:10:0 last 100 minutes "
+        "interval 10 min. START:INTERVAL:END arbitrary timestamps.",
     )
     parser.add_argument(
         "--ms", required=False, default="tart.ms", help="Output MS table name."
@@ -297,7 +354,39 @@ def main():
             "At the moment can only concatenate from JSON or HDF files, not a combination of the two"
         )
 
-    if ARGS.json:
+    if ARGS.archive_search:
+        if ARGS.json or ARGS.hdf:
+            raise RuntimeError(
+                "--archive-search cannot be combined with --json or --hdf"
+            )
+        archive_dir = tempfile.mkdtemp(prefix="tart2ms_archive_")
+        logger.info(f"Downloading TART archive data to '{archive_dir}'")
+        h5_files = download_archive_files(ARGS.archive_search, archive_dir)
+        if not h5_files:
+            raise RuntimeError(
+                "No HDF5 files found in the TART archive for the given queries"
+            )
+        logger.info("Writing measurement set '{}'...".format(ARGS.ms))
+        ms_from_hdf5(
+            ARGS.ms,
+            h5_files,
+            ARGS.pol2,
+            phase_center_policy,
+            ARGS.override_telescope_name,
+            applycal=not ARGS.uncalibrated,
+            fill_model=ARGS.addmodel,
+            writemodelcatalog=ARGS.writemodelcatalog,
+            fetch_sources=not ARGS.no_fetch_sources,
+            catalog_recache=ARGS.sources_recache,
+            write_extragalactic_catalogs=not ARGS.no_celestial_sources,
+            filter_end_utc=ARGS.timerange_end_utc,
+            filter_start_utc=ARGS.timerange_start_utc,
+            chunks_out=ARGS.chunks,
+            override_ant_pos=ARGS.override_ant_pos,
+            cat_name_prefix=ARGS.model_catalog_name_prefix,
+        )
+
+    elif ARGS.json:
         logger.info("Getting Data from file: {}".format(ARGS.json))
         logger.info("Writing measurement set '{}'...".format(ARGS.ms))
         ms_from_json(

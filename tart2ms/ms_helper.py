@@ -14,7 +14,7 @@ from astropy import units as u
 from casacore.tables import table
 from astropy.constants import c
 
-from tart2ms.catalogs.catalog_reader import catalog_factory
+from tart2ms.catalogs.catalog_reader import catalog_factory, radec_rad
 from tart2ms.fixvis import progress
 
 logger = logging.getLogger("tart2ms")
@@ -81,8 +81,9 @@ def get_catalog_sources_azel(timestamps, location):
     catsources += catalog_factory.from_SUMMS(fluxlim15=0.5)
     catsources += catalog_factory.from_MKGains(fluxlim15=0.5)
     sources = []
-    ras = list(map(lambda s: s.rarad, catsources))
-    decs = list(map(lambda s: s.decrad, catsources))
+    # one vectorized fk5->icrs transform instead of one per source;
+    # numerically equivalent to [s.rarad for s in ...] (issue #53)
+    ras, decs = radec_rad(catsources)
     alts, azs = radec2azel(ras, decs, location=location, obstime=timestamps)
     for ti, tt in enumerate(timestamps):
         ttsources = []
@@ -201,6 +202,7 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                 # get J2000 RADEC
                 sources_radec = np.empty((len(sources_i), 2))
                 names = []
+                azel_idx = []
                 for src_i, src in enumerate(sources_i):
                     names.append(src['name'].replace(" ", "_").replace("CELESTIAL_", "").replace("SOLAR_", ""))
                     # If source already has 'ra'/'dec' in radians (e.g. from tart-catalogue-client
@@ -209,9 +211,32 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                         sources_radec[src_i, 0] = src['ra']
                         sources_radec[src_i, 1] = src['dec']
                     else:
-                        direction_src = azel2radec(az=src['az'], el=src['el'], distance=src.get('distance', None),
-                                                   location=location, obstime=sources_obstime[nn_source_epoch])
-                        sources_radec[src_i, :] = direction_src
+                        azel_idx.append(src_i)
+                if azel_idx:
+                    # Batch the az/el -> J2000 conversions into one vectorized
+                    # SkyCoord transform per distance mode (issue #53: one
+                    # scalar transform per source made this loop ~70% of the
+                    # model-prediction runtime). Same astropy machinery runs
+                    # per element either way, so results are equivalent to the
+                    # old per-source calls.
+                    obstime_i = sources_obstime[nn_source_epoch]
+                    dist_idx = [i for i in azel_idx
+                                if sources_i[i].get('distance', None) is not None]
+                    pt_idx = [i for i in azel_idx
+                              if sources_i[i].get('distance', None) is None]
+                    for grp, with_dist in ((pt_idx, False), (dist_idx, True)):
+                        if not grp:
+                            continue
+                        az = np.array([sources_i[i]['az'] for i in grp], dtype=float)
+                        el = np.array([sources_i[i]['el'] for i in grp], dtype=float)
+                        # solar system bodies need their distance to convert
+                        # back to J2000 in the barycentric frame
+                        distance = (u.Quantity([sources_i[i]['distance'] for i in grp])
+                                    if with_dist else None)
+                        src_ra, src_dec = azel2radec(az=az, el=el, distance=distance,
+                                                     location=location, obstime=obstime_i)
+                        sources_radec[grp, 0] = src_ra
+                        sources_radec[grp, 1] = src_dec
                 # get lm cosines to sources (depends on per-dataset zenith, so
                 # recomputed in the loop below with the cached sources_radec)
                 source_type = np.array(["POINT"] * len(sources_i))

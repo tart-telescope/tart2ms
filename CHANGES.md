@@ -1,5 +1,54 @@
 # Changes
 
+## v0.9.4 — Archive search, GNSS model sources, 6x faster models
+
+- **Issue #53 speedups: batched azel2radec + cached catalog parsing**: the
+  az/el -> J2000 conversion in `predict_model` and the SOURCE table writer is now
+  one vectorized `azel2radec` call per source epoch instead of one scalar SkyCoord
+  transform per source (5760 -> 120 calls on the shipped 60-timestamp dataset;
+  that loop was ~70% of the `--add-model` runtime). Catalog parsing in
+  `catalogs/catalog_reader.py` is cached per (path, mtime, flux cut) and the
+  fk5->icrs transform behind the `rarad`/`decrad` accessors is memoised and
+  vectorized (`radec_rad`). Output is bit-identical for the batching change and
+  within 3e-15 rad for the vectorized catalog angles; MODEL_DATA and SOURCE
+  tables are bit-identical end-to-end on the shipped test datasets. Model-path
+  wall on the 60-timestamp test HDF5 drops 130.3 s -> 20.7 s (median-of-medians,
+  interleaved A/B on a shared host: 6.3x).
+
+- **GNSS sources silently dropped from models and the SOURCE table (found while
+  profiling issue #53)**: `__fetch_sources_via_client` produced sources without
+  `az`/`el` keys and applied a declination cut masquerading as an elevation cut, so
+  `predict_model`'s `el >= 45` filter dropped every client-fetched GNSS source and
+  the SOURCE table ended up empty. Client sources now carry true topocentric Az/El
+  (from the catalogue client's `horizontal_positions`), the filter is a real
+  elevation cut, and the SOURCE table writer uses `ra`/`dec` directly when present
+  (same convention as `predict_model`, also skipping the azel2radec round trip).
+  Verified end-to-end: 108 GNSS SOURCE rows and a predicted GNSS model component
+  where there were none.
+
+- **Issue #6 (astropy "overflow encountered in double_scalars")**: documented the
+  root cause in `tart2ms/tart2ms.py`. The logged `Time 5167445918.181001` value is
+  the observation epoch in seconds since the MJD epoch (the MS TIME convention), not
+  a bad timestamp. The RuntimeWarnings came from an astropy <= 5.0.0 bug triggered
+  by `iers.conf.auto_max_age = None` (fixed upstream in astropy 5.0.1,
+  astropy/astropy#12713). No functional change.
+
+- **Issue #44 (`--archive-search`)**: added a `--archive-search "<Name>:START:INTERVAL:END"`
+  CLI option that queries HDF5 visibility files from the TART online archive (via
+  `tart_tools.archive_handler`) and converts them to a Measurement Set. START/END
+  accept minute offsets relative to now (e.g. `-10` = ten minutes ago, `0` = now) or
+  ISO-8601 timestamps; INTERVAL is the sampling interval in minutes. Query parsing
+  and window resolution live in `tart2ms/util.py` (`parse_archive_query`,
+  `archive_query_window`) and are covered by `tart2ms/tests/test_util.py`.
+
+- **Issue #54 (zero-gain antennas are auto-flagged)**: antennas whose stored
+  calibration gain is zero (or non-finite) now have every baseline touching them
+  written out with `FLAG` set, instead of silently producing meaningless
+  calibrated visibilities. The check runs on the stored gains in both the HDF5 and
+  JSON loaders (also with `--uncalibrated`, where zeroed gains would otherwise be
+  hidden by the gain override) and the per-row flags are passed to `ms_create` via
+  the new `flag_rows` argument.
+
 ## v0.9.3 — Performance and dask scheduler
 
 ### Performance optimizations
