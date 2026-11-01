@@ -1,5 +1,22 @@
 # Changes
 
+## Unreleased — Fix GNSS model positions (issue #68)
+
+- **Issue #68 (`--add-model` predicted every GNSS source at one barycentric
+  position)**: `__fetch_sources_via_client` attached `ra`/`dec` from the
+  catalogue client's `celestial_positions()`, which runs the SGP4 ECEF
+  positions through a geocentric ITRS→ICRS transform — barycentric directions
+  that put every satellite at the Earth's barycentric position
+  (tart-telescope/catalogue#14), so CASA calibration modelled a single wrong
+  point source. The function now builds sources from `horizontal_positions()`
+  alone (true topocentric az/el, plus `jy`), and `predict_model`, the SOURCE
+  table writer and the `--write-model-catalog` writer convert to J2000 via
+  the existing batched `azel2radec` path. Also drops one satellite-position
+  API call per source epoch. Verified on the shipped test HDF: 108 GNSS
+  SOURCE rows with 108 distinct directions (RA spread 21°–351°, Dec −61°–+3°,
+  previously all at one RA/Dec) and non-zero MODEL_DATA (max |amp| 1.76e7).
+  Two new regression tests pin the behaviour; suite 51/51.
+
 ## v0.9.4 — Archive search, GNSS model sources, 6x faster models
 
 - **Issue #53 speedups: batched azel2radec + cached catalog parsing**: the
