@@ -631,10 +631,12 @@ def ms_create(
             if sources_i is None:
                 continue
             # Convert to J2000. Sources that already carry 'ra'/'dec' in
-            # radians (e.g. from tart-catalogue-client) are used directly --
-            # same convention as predict_model -- the rest are converted from
-            # az/el in ONE vectorized call per database (issue #53) instead
-            # of one scalar SkyCoord transform per source.
+            # radians (a catalog of precomputed J2000 directions) are used
+            # directly -- same convention as predict_model -- the rest are
+            # converted from az/el in ONE vectorized call per database
+            # (issue #53) instead of one scalar SkyCoord transform per
+            # source. Note GNSS sources carry topocentric az/el only: their
+            # directions must go through azel2radec (issue #68).
             radec_by_idx = {}
             azel_idx = []
             for src_i, src in enumerate(sources_i):
@@ -1473,43 +1475,34 @@ def __fetch_sources_via_client(
 ):
     """Fetch GNSS sources using tart-catalogue-client.
 
-    Uses celestial_positions to get J2000 RA/Dec directly, avoiding
-    the Az/El intermediate representation and subsequent azel2radec
-    conversion in predict_model. Also computes true topocentric Az/El
-    (via the client's ECEF positions) so that elevation filtering works
-    and consumers expecting 'az'/'el' (SOURCE table writer, azel2radec
-    fallback in predict_model) can use these sources like any other.
+    Returns true topocentric Az/El (degrees) from the client's SGP4 ECEF
+    positions, which drive both elevation filtering and the azel2radec
+    conversion to J2000 done by predict_model and the SOURCE table writer.
+
+    Deliberately does NOT attach 'ra'/'dec': the client's
+    celestial_positions() returns *barycentric* ICRS directions, which put
+    every GNSS satellite at the Earth's barycentric position
+    (tart-telescope/catalogue issue #14), so all satellites predict at a
+    single wrong sky position (tart2ms issue #68). The az/el path here is
+    topocentric and verified correct.
     """
     client = CatalogueClient()
     sources = []
     for tt in downsampletimes:
-        sats = client.celestial_positions(dt=tt)
-        # True topocentric az/el in degrees from the same SGP4 ECEF
-        # positions. Filtering on celestial declination here (as this
-        # function used to) is not an elevation cut and, together with
-        # the missing 'el' key, silently dropped every GNSS source from
-        # the model and the SOURCE table.
-        horiz_by_name = {
-            h["name"]: h
-            for h in client.horizontal_positions(
-                lat=observer_lat, lon=observer_lon, dt=tt,
-                min_elevation=-90.0, name_regex=None,
-            )
-        }
-        # Return RA/Dec in radians for direct use in predict_model,
-        # plus Az/El in degrees (elevation filtering + SOURCE table).
+        # Filtering on celestial declination (as this function used to) is
+        # not an elevation cut and, together with the missing 'el' key,
+        # silently dropped every GNSS source from the model and the SOURCE
+        # table -- always filter on the topocentric elevation below.
         mapped = []
-        for s in sats:
-            h = horiz_by_name.get(s["name"])
-            if h is None:
-                continue
+        for h in client.horizontal_positions(
+            lat=observer_lat, lon=observer_lon, dt=tt,
+            min_elevation=-90.0, name_regex=None,
+        ):
             mapped.append({
-                "name": s["name"],
-                "ra": np.radians(s["ra_hours"] * 15.0),  # hours -> degrees -> radians
-                "dec": np.radians(s["dec_degrees"]),
+                "name": h["name"],
                 "az": h["azimuth_deg"],
                 "el": h["elevation_deg"],
-                "jy": s.get("jy", 0.0),
+                "jy": h.get("jy", 0.0),
             })
         filtered = list(
             filter(
@@ -1525,7 +1518,7 @@ def __fetch_sources_via_client(
     LOGGER.info(
         f"GNSS source catalogs retrieved for {len(downsampletimes)} timestamps"
         f" via tart-catalogue-client (single TLE fetch + local SGP4,"
-        f" celestial positions)"
+        f" topocentric az/el)"
     )
     return sources, downsampletimes
 

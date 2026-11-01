@@ -1,6 +1,8 @@
 #
 # Unit test for tart-catalogue-client integration in __fetch_sources.
-# Verifies celestial_positions produces correct ra/dec in radians.
+# Verifies sources carry topocentric az/el (and no barycentric ra/dec --
+# see issue #68: celestial_positions() ra/dec pointed every GNSS source
+# at the Earth's barycentric position).
 #
 
 import unittest
@@ -23,7 +25,7 @@ _fetch_via = getattr(t2m, "__fetch_sources_via_client")
 
 
 class TestFetchSourcesClient(unittest.TestCase):
-    """Test __fetch_sources via tart-catalogue-client celestial_positions."""
+    """Test __fetch_sources via tart-catalogue-client (topocentric az/el)."""
 
     @classmethod
     def setUpClass(cls):
@@ -46,17 +48,22 @@ class TestFetchSourcesClient(unittest.TestCase):
             self.assertIsInstance(src, list)
             for s in src:
                 self.assertIn("name", s)
-                self.assertIn("ra", s)
-                self.assertIn("dec", s)
                 self.assertIn("az", s)
                 self.assertIn("el", s)
                 self.assertIn("jy", s)
-                self.assertIsInstance(s["ra"], (int, float, np.floating))
-                self.assertIsInstance(s["dec"], (int, float, np.floating))
                 self.assertIsInstance(s["az"], (int, float, np.floating))
                 self.assertIsInstance(s["el"], (int, float, np.floating))
+                self.assertIsInstance(s["jy"], (int, float, np.floating))
 
-    def test_ra_dec_in_radians(self):
+    def test_no_barycentric_ra_dec(self):
+        """Client-fetched GNSS sources must not carry 'ra'/'dec' (issue #68).
+
+        celestial_positions() returns barycentric ICRS directions that point
+        every GNSS satellite at the Earth's barycentric position
+        (tart-telescope/catalogue issue #14). Sources must therefore carry
+        topocentric az/el only, so predict_model and the SOURCE table writer
+        convert via azel2radec (the verified-correct path).
+        """
         sources, _ = _fetch_via(
             downsampletimes=[self.timestamps[0]],
             observer_lat=LAT,
@@ -64,13 +71,62 @@ class TestFetchSourcesClient(unittest.TestCase):
             filter_elevation=-90.0,
             filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
         )
+        self.assertGreater(len(sources[0]), 0)
         for s in sources[0]:
-            # RA should be in radians (0 to 2π)
-            self.assertGreaterEqual(s["ra"], 0.0)
-            self.assertLessEqual(s["ra"], 2 * np.pi)
-            # DEC should be in radians (-π/2 to π/2)
-            self.assertGreaterEqual(s["dec"], -np.pi / 2)
-            self.assertLessEqual(s["dec"], np.pi / 2)
+            self.assertNotIn(
+                "ra", s,
+                f"Source {s['name']} carries barycentric 'ra' (issue #68)")
+            self.assertNotIn(
+                "dec", s,
+                f"Source {s['name']} carries barycentric 'dec' (issue #68)")
+            # topocentric az/el are well-defined degrees
+            self.assertGreaterEqual(s["az"], 0.0)
+            self.assertLessEqual(s["az"], 360.0)
+            self.assertGreaterEqual(s["el"], -90.0)
+            self.assertLessEqual(s["el"], 90.0)
+
+    def test_model_directions_spread_over_sky(self):
+        """azel2radec on the fetched az/el must spread GNSS sources over the sky.
+
+        This is the observable symptom of issue #68: with the barycentric
+        ra/dec pass-through, every GNSS source predicted at a single sky
+        position (max pairwise separation ~0). The topocentric az/el path
+        must instead yield widely separated directions.
+        """
+        from astropy.coordinates import EarthLocation, SkyCoord
+        import astropy.units as u
+        from tart2ms.ms_helper import azel2radec
+
+        sources, _ = _fetch_via(
+            downsampletimes=[self.timestamps[0]],
+            observer_lat=LAT,
+            observer_lon=LON,
+            filter_elevation=-90.0,
+            filter_name=r"(?:^GPS.*)|(?:^QZS.*)|(?:^BEIDOU.*)|(?:^GSAT.*)",
+        )
+        srcs = sources[0]
+        self.assertGreater(len(srcs), 1)
+        location = EarthLocation.from_geodetic(
+            lon=LON * u.deg, lat=LAT * u.deg
+        )
+        az = np.array([s["az"] for s in srcs])
+        el = np.array([s["el"] for s in srcs])
+        ra, dec = azel2radec(
+            az=az, el=el, location=location,
+            obstime=self.timestamps[0],
+        )
+        coords = SkyCoord(ra=np.asarray(ra) * u.rad,
+                          dec=np.asarray(dec) * u.rad)
+        max_sep = max(
+            coords[i].separation(coords[j]).deg
+            for i in range(len(coords) - 1)
+            for j in range(i + 1, len(coords))
+        )
+        self.assertGreater(
+            max_sep, 10.0,
+            f"GNSS model directions cluster at one position "
+            f"(max separation {max_sep:.3f} deg) -- issue #68"
+        )
 
     def test_name_filtering(self):
         sources, _ = _fetch_via(
@@ -98,8 +154,9 @@ class TestFetchSourcesClient(unittest.TestCase):
         self.assertEqual(len(times), len(self.timestamps))
         for src in sources:
             for s in src:
-                self.assertIn("ra", s)
-                self.assertIn("dec", s)
+                # no barycentric ra/dec pass-through (issue #68)
+                self.assertNotIn("ra", s)
+                self.assertNotIn("dec", s)
                 self.assertIn("jy", s)
 
     def test_elevation_filtering(self):

@@ -211,8 +211,12 @@ def predict_model(dask_data_shape, dask_data_chunking, dask_data_dtype,
                 azel_idx = []
                 for src_i, src in enumerate(sources_i):
                     names.append(src['name'].replace(" ", "_").replace("CELESTIAL_", "").replace("SOLAR_", ""))
-                    # If source already has 'ra'/'dec' in radians (e.g. from tart-catalogue-client
-                    # celestial_positions), use them directly. Otherwise convert from az/el.
+                    # If source already has 'ra'/'dec' in radians (a catalog
+                    # of precomputed J2000 directions), use them directly.
+                    # Otherwise convert from az/el -- the path GNSS sources
+                    # take: their az/el is topocentric, while the client's
+                    # celestial_positions ra/dec is barycentric and wrong
+                    # for prediction (issue #68).
                     if 'ra' in src and 'dec' in src:
                         sources_radec[src_i, 0] = src['ra']
                         sources_radec[src_i, 1] = src['dec']
