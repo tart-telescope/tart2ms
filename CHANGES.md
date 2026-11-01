@@ -2,6 +2,8 @@
 
 ## Unreleased — Fix GNSS model positions (issue #68)
 
+## v0.9.5 — Fix GNSS model positions (issue #68)
+
 - **Issue #68 (`--add-model` predicted every GNSS source at one barycentric
   position)**: `__fetch_sources_via_client` attached `ra`/`dec` from the
   catalogue client's `celestial_positions()`, which runs the SGP4 ECEF
