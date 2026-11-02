@@ -8,7 +8,7 @@ version = '0.9.5'
 description = "Convert TART observation data to Measurement Sets"
 readme = "README.md"
 license = "GPL-3.0-or-later"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 authors = [
     { name = "Tim Molteno", email = "tim@elec.ac.nz" },
 ]
@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Communications :: Ham Radio",
     "Topic :: Scientific/Engineering",
 ]
@@ -27,7 +28,13 @@ dependencies = [
     "tart >= 1.4.0",
     "tart_tools >= 1.4.0",
     "astropy (>=7.1.0,<9.0.0)",
-    "dask-ms (>=0.2.0,<0.3.0)",
+    # dask-ms-2 is tmolteno's maintained fork of dask-ms 0.2.x
+    # (github.com/tmolteno/dask-ms), published under its own name because
+    # PyPI rejects direct-URL dependencies. Same `daskms` import; 0.2.33
+    # widens requires-python to <3.15 so tart2ms installs on Python 3.14
+    # (ratt-ru/dask-ms 0.2.x caps at <3.14 and its older releases cannot
+    # build there). See issue #66.
+    "dask-ms-2 (>=0.2.33,<0.3.0)",
     "h5py (>=3.1.0,<4.0.0)",
     "numpy (>=1.6.0,<3.0.0)",
     "pandas (>=2.0.0,<3.0.0)",
