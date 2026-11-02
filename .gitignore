@@ -86,6 +86,7 @@ celerybeat-schedule
 # Environments
 .env
 .venv
+.venv*/
 env/
 venv/
 ENV/
@@ -105,3 +106,6 @@ venv.bak/
 # mypy
 .mypy_cache/
 None0.txt
+
+# Local scratch (profile runs, dependency checkouts)
+.work/
