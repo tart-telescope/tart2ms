@@ -2,6 +2,8 @@
 
 ## Unreleased — casacure: python-casacore removed
 
+## v0.9.6 — casacure: python-casacore removed
+
 - **python-casacore is gone** — the table/quanta imports are now `casacure.*`
   (the pure-Rust backend, tmolteno/casacore), and the pyrap bindings the UVW
   generator used are replaced:
