@@ -126,7 +126,7 @@ class TestTart2MS(unittest.TestCase):
         )
         self.assertTrue(os.path.isdir(REPHASE_MS))
         # Verify the MS has expected structure
-        from casacore.tables import table
+        from casacure.tables import table
         with table(REPHASE_MS, ack=False) as t:
             nrows = t.nrows()
             colnames = t.colnames()
@@ -157,7 +157,7 @@ class TestTart2MS(unittest.TestCase):
                      uvw_generator="telescope_snapshot",
                      fetch_sources=False)
 
-        from casacore.tables import table
+        from casacure.tables import table
         with table(test_ms, ack=False) as t:
             a1 = t.getcol("ANTENNA1")
             a2 = t.getcol("ANTENNA2")
@@ -182,7 +182,7 @@ class TestTart2MS(unittest.TestCase):
                         fill_model=True,
                         writemodelcatalog=True,
                         fetch_sources=False)
-            from pyrap.tables import table as tbl
+            from casacure.tables import table as tbl
             with tbl(test_ms) as tt:
                 self.assertTrue("MODEL_DATA" in tt.colnames())
         else:

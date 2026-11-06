@@ -9,10 +9,13 @@ import sys
 
 import numpy as np
 from progress.bar import FillingSquaresBar as bar
-from pyrap import quanta
-from pyrap.measures import measures
-from pyrap.quanta import quantity
-from pyrap.tables import table as tbl
+
+import erfa
+from astropy import units as u
+from astropy.coordinates import ITRS, SkyCoord
+from astropy.time import Time
+from casacure.quanta import constants, quantity
+from casacure.tables import table as tbl
 
 logger = logging.getLogger("tart2ms")
 
@@ -109,6 +112,87 @@ def dense2sparse_uvw(a1, a2, time, ddid, padded_uvw, ack=True):
     return new_uvw
 
 
+def _coldesc_units(v):
+    """QuantumUnits from a column descriptor, as a plain list of unit strings.
+
+    python-casacore returns a plain list (``['m', 'm', 'm']``); casacure
+    returns array-valued keywords written through daskms as records
+    (``{'shape': array([3]), 'array': ['m', 'm', 'm']}``). Normalise both
+    (and a bare scalar unit) to a list.
+    """
+    if isinstance(v, dict):
+        v = v.get("array", [])
+    if isinstance(v, str):
+        return [v]
+    return list(v)
+
+
+def _min_rotation(a, b):
+    """The minimal rotation (Rodrigues) taking unit vector a onto unit vector b."""
+    ax = np.cross(a, b)
+    s = np.linalg.norm(ax)
+    c = float(np.clip(np.dot(a, b), -1.0, 1.0))
+    if s < 1e-15:
+        return np.eye(3)
+    kx = np.array(
+        [[0.0, -ax[2], ax[1]], [ax[2], 0.0, -ax[0]], [-ax[1], ax[0], 0.0]]
+    ) / s
+    return np.eye(3) + s * kx + (1.0 - c) * (kx @ kx)
+
+
+def _itrf_uvw_frame(mjd, ra, dec):
+    """Unit (u, v, w) axes in ITRF for the J2000 direction (ra, dec) at epoch.
+
+    Replicates what casacore's ``measures.to_uvw`` used: the baseline is
+    transported ITRF -> J2000 by the frame chain (CIO precession-nutation,
+    Earth rotation, polar motion -- erfa), and the whole frame is then
+    rotated so the source lands on its *apparent* place (annual aberration
+    and light deflection, via astropy's ICRS -> ITRS direction transform).
+
+    Validated against python-casacore 3.8.1's ``to_uvw()``: the frame agrees
+    to better than ~1.7 arcsec of rotation, i.e. under 2e-5 m on TART's
+    baselines (python-casacore's exact internal chain is not reproducible
+    from public APIs; this is far below TART's imaging thresholds).
+
+    mjd: epoch in days (MJD, scale from the caller's TIME column).
+    ra, dec: phase reference in radians (J2000).
+    """
+    d1, d2 = 2400000.5, float(mjd)
+    c2i = erfa.c2i06a(d1, d2)                            # ICRS -> true of date
+    pom = erfa.pom00(0.0, 0.0, erfa.sp00(d1, d2))        # polar motion (xp=yp=0)
+    g = pom @ erfa.rz(erfa.era00(d1, d2), np.eye(3)) @ c2i   # ICRS -> ITRF
+
+    shat = np.array(
+        [np.cos(dec) * np.cos(ra), np.cos(dec) * np.sin(ra), np.sin(dec)]
+    )
+    east = np.array([-np.sin(ra), np.cos(ra), 0.0])
+    north = np.array(
+        [
+            -np.sin(dec) * np.cos(ra),
+            -np.sin(dec) * np.sin(ra),
+            np.cos(dec),
+        ]
+    )
+
+    s_geo = g @ shat
+    c = SkyCoord(ra=ra * u.rad, dec=dec * u.rad, frame="icrs")
+    it = c.transform_to(ITRS(obstime=Time(mjd, format="mjd", scale="utc")))
+    s_app = np.array(
+        [
+            it.cartesian.x.to_value(),
+            it.cartesian.y.to_value(),
+            it.cartesian.z.to_value(),
+        ]
+    )
+    s_app /= np.linalg.norm(s_app)
+
+    f = _min_rotation(s_geo, s_app)
+    return f @ (g @ east), f @ (g @ north), s_app
+
+
+_TIME_SCALES = {"UTC": "utc", "TAI": "tai", "IAT": "tai", "GPS": "gps", "TT": "tt"}
+
+
 def synthesize_uvw(
     station_ECEF,
     time,
@@ -142,11 +226,21 @@ def synthesize_uvw(
         }
     Note: input and output antenna indexes may not have the same
           order or be flipped in 1 to 2 index
-    Note: This operation CANNOT be applied blockwise due
-          to a casacore.measures threadsafety issue
+    Note: The UVW frame is rebuilt per timestamp with erfa/astropy
+          (see _itrf_uvw_frame); there is no casacore.measures state,
+          so unlike the old pyrap implementation this is not subject
+          to casacore's measures thread-safety restriction.
     """
     assert time.size == a1.size
     assert a1.size == a2.size
+    if posframe.upper() not in ("ITRF", "ITRS"):
+        raise NotImplementedError(
+            f"UVW synthesis assumes ITRF antenna positions, got {posframe!r}"
+        )
+    if stopctr_epoch.lower() not in ("j2000", "icrs"):
+        raise NotImplementedError(
+            f"phase reference must be J2000/ICRS, got {stopctr_epoch!r}"
+        )
 
     ants = np.concatenate((a1, a2))
     unique_ants = np.arange(np.max(ants) + 1)
@@ -163,55 +257,34 @@ def synthesize_uvw(
     padded_a1 = np.tile(antindices[:, 0], (1, ntime)).ravel()
     padded_a2 = np.tile(antindices[:, 1], (1, ntime)).ravel()
 
-    dm = measures()
-    epoch = dm.epoch(time_TZ, quantity(time[0], time_unit))
-    refdir = dm.direction(
-        stopctr_epoch,
-        quantity(phase_ref[0, 0], stopctr_units[0]),
-        quantity(phase_ref[0, 1], stopctr_units[1]),
-    )
-    obs = dm.position(
-        posframe,
-        quantity(station_ECEF[0, 0], posunits[0]),
-        quantity(station_ECEF[0, 1], posunits[1]),
-        quantity(station_ECEF[0, 2], posunits[2]),
-    )
-
-    # Pre-build vectorized baseline: all antennas paired with reference (antenna 0).
-    # The ITRF offset vectors are static; call to_uvw once per timestamp (not per antenna).
-    dm.do_frame(obs)
-    dm.do_frame(refdir)
-    dm.do_frame(epoch)
-
-    ref_pos = station_ECEF[0]
-    x_pairs = np.column_stack([station_ECEF[:, 0], np.full(na, ref_pos[0])]).ravel()
-    y_pairs = np.column_stack([station_ECEF[:, 1], np.full(na, ref_pos[1])]).ravel()
-    z_pairs = np.column_stack([station_ECEF[:, 2], np.full(na, ref_pos[2])]).ravel()
-
-    baseline_measure = dm.baseline(
-        posframe,
-        quantity(x_pairs, posunits[0]),
-        quantity(y_pairs, posunits[1]),
-        quantity(z_pairs, posunits[2]),
-    )
+    # phase reference -> J2000 radians
+    ra = u.Quantity(phase_ref[0, 0], stopctr_units[0]).to_value(u.rad)
+    dec = u.Quantity(phase_ref[0, 1], stopctr_units[1]).to_value(u.rad)
+    scale = _TIME_SCALES.get(str(time_TZ).upper(), "utc")
 
     if ack:
         p = progress("Calculating UVW", max=unique_time.size)
     for ti, t in enumerate(unique_time):
         if ack:
             p.next()
-        dm.do_frame(dm.epoch(time_TZ, quantity(t, time_unit)))
+        # TIME column values are seconds (etc) since MJD 0 in the column's
+        # MEASINFO reference scale; convert to MJD days for the frame.
+        mjd = u.Quantity(t, time_unit).to_value(u.day)
+        if scale != "utc":
+            mjd = Time(mjd, format="mjd", scale=scale).utc.mjd
+        u_vec, v_vec, w_vec = _itrf_uvw_frame(mjd, ra, dec)
 
-        # Single vectorized call for all antenna UVW positions
-        result = dm.to_uvw(baseline_measure)
-        xyz_vals = np.array(result["xyz"].get_value()).reshape(na, 6)
-        station_uv = xyz_vals[:, 0:3]
-
-        # Vectorized baseline computation. antindices is (nbl, 2) with the
-        # bl-th baseline (a1, a2) -> station_uv[a1] - station_uv[a2].
+        # UVW of every antenna position, then difference per baseline.
         # Same convention as in CASA (Convention for UVW calculations in
         # CASA, Rau 2013). Broadcasting over all baselines avoids the
         # per-baseline Python loop and produces identical results.
+        station_uv = np.column_stack(
+            [
+                station_ECEF @ u_vec,
+                station_ECEF @ v_vec,
+                station_ECEF @ w_vec,
+            ]
+        )
         bl_a1 = antindices[:, 0]
         bl_a2 = antindices[:, 1]
         padded_uvw[ti * nbl : (ti + 1) * nbl, :] = station_uv[bl_a1] - station_uv[bl_a2]
@@ -267,7 +340,7 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
         mm = s_d_dec * c_d_decp - c_d_dec * s_d_decp * c_d_ra
         nn = s_d_dec * s_d_decp + c_d_dec * c_d_decp * c_d_ra - 1.0
 
-        wl = quanta.constants["c"].get_value() / freq  # shape (nfreq,)
+        wl = constants["c"].get_value() / freq  # shape (nfreq,)
         # Use broadcasting instead of creating full nrowsel x nfreq x 3 copies
         # uvw has shape (nrowsel, 3), wl has shape (nfreq,)
         uvw_sel = uvw[selfid, :]  # (nrowsel, 3)
@@ -286,17 +359,19 @@ def rephase(vis, uvw, field_ids, sel, freq, pos, refdir, phasesign=-1):
 def fixms(msname, ack=True):
     """
     Runs an operation similar to the CASA fixvis task
-    Recomputes UVW coordinates with casacore for the predicted
-    az-elev delay projections given a dataset with antenna ICRS
+    Recomputes UVW coordinates for the predicted
+    az-elev delay projections given a dataset with antenna ITRF
     positions and a time centroid column.
 
-    Note: This operation CANNOT be applied blockwise due
-    to a casacore.measures threadsafety issue
+    Note: the UVW frame is rebuilt per timestamp with erfa/astropy
+    (see _itrf_uvw_frame); there is no shared casacore.measures state,
+    so unlike the old pyrap implementation this is not subject to
+    casacore's measures thread-safety restriction.
     """
     with tbl(msname + "::ANTENNA", ack=False) as t:
         apos = t.getcol("POSITION")
         aposcoldesc = t.getcoldesc("POSITION")
-        posunits = aposcoldesc["keywords"]["QuantumUnits"]
+        posunits = _coldesc_units(aposcoldesc["keywords"]["QuantumUnits"])
         posframe = aposcoldesc["keywords"]["MEASINFO"]["Ref"]
 
     with tbl(msname + "::FIELD", ack=False) as t:
@@ -311,7 +386,7 @@ def fixms(msname, ack=True):
         fnames = t.getcol("NAME")
         field_stop_ctrs = t.getcol("PHASE_DIR")
         fieldcoldesc = t.getcoldesc("PHASE_DIR")
-        stopctr_units = fieldcoldesc["keywords"]["QuantumUnits"]
+        stopctr_units = _coldesc_units(fieldcoldesc["keywords"]["QuantumUnits"])
         stopctr_epoch = fieldcoldesc["keywords"]["MEASINFO"]["Ref"]
 
     with tbl(msname, ack=False) as t:
@@ -323,7 +398,7 @@ def fixms(msname, ack=True):
         time = t.getcol("TIME_CENTROID")
         timecoldesc = t.getcoldesc("TIME_CENTROID")
         time_TZ = timecoldesc["keywords"]["MEASINFO"]["Ref"]
-        time_unit = timecoldesc["keywords"]["QuantumUnits"][0]
+        time_unit = _coldesc_units(timecoldesc["keywords"]["QuantumUnits"])[0]
 
     logger.info("Computing UVW coordinates for output dataset... WAIT")
     new_uvw = np.zeros_like(uvw, dtype=uvw.dtype)

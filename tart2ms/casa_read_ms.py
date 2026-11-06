@@ -12,7 +12,7 @@ import logging
 import datetime
 import numpy as np
 
-from casacore.tables import table
+from casacure.tables import table
 
 logger = logging.getLogger("tart2ms")
 
@@ -35,21 +35,28 @@ def read_ms(
     channel = np.array(channel)
     logger.info(f"Reading channel {channel}")
     logger.debug(f"colnames{ms.colnames()}")
-    logger.debug(f"keywordnames{ms.keywordnames()}")
-    logger.debug(f"fields{ms.fieldnames()}")
+    # casacure has no keywordnames()/fieldnames() helpers (python-casacore
+    # conveniences): derive them from getkeywords() and the FIELD subtable.
+    logger.debug(f"keywords{list(ms.getkeywords())}")
+    with table(ms.getkeyword("FIELD"), ack=False) as fld:
+        logger.debug(f"fields{list(fld.getcol('NAME'))}")
 
     ant = table(ms.getkeyword("ANTENNA"), ack=False)
     ant_p = ant.getcol("POSITION")
     logger.debug("Antenna Positions {}".format(ant_p.shape))
 
-    # Now use TAQL to select only good data from the correct field
-    subt = ms.query(
-        f"FIELD_ID=={field_id}",
-        sortlist="ARRAY_ID",
-        columns=f"TIME, {ms_column}, UVW, ANTENNA1, ANTENNA2, FLAG",
+    # Now use TAQL to select only good data from the correct field.
+    # casacure's table.query() only takes a WHERE clause (it ignores
+    # pyrap's sortlist=/columns= kwargs), so express the projection and
+    # the ARRAY_ID sort in the TaQL statement itself.
+    subt = ms.taql(
+        f"SELECT TIME, {ms_column}, UVW, ANTENNA1, ANTENNA2, FLAG "
+        f"FROM $1 WHERE FIELD_ID=={field_id} ORDER BY ARRAY_ID"
     )
 
-    fields = table(subt.getkeyword("FIELD"), ack=False)
+    # Read FIELD from the MS itself: the query result's copy of the keyword
+    # would resolve relative to the result table's own directory.
+    fields = table(ms.getkeyword("FIELD"), ack=False)
     # field columns ['DELAY_DIR', 'PHASE_DIR', 'REFERENCE_DIR', 'CODE', 'FLAG_ROW', 'NAME', 'NUM_POLY', 'SOURCE_ID', 'TIME']
     phase_dir = fields.getcol("PHASE_DIR")[field_id][0]
     name = fields.getcol("NAME")[field_id]
@@ -88,9 +95,11 @@ def read_ms(
     logger.debug(f"raw_vis {raw_vis.shape}")
 
     try:
-        # Deal with the case where WEIGHT_SPECTRUM is not present.s
-        subt_ws = ms.query(
-            f"FIELD_ID=={field_id}", sortlist="ARRAY_ID", columns="WEIGHT_SPECTRUM"
+        # Deal with the case where WEIGHT_SPECTRUM is not present.
+        # (casacure's query() has no sortlist=/columns= kwargs -- TaQL.)
+        subt_ws = ms.taql(
+            f"SELECT WEIGHT_SPECTRUM FROM $1 "
+            f"WHERE FIELD_ID=={field_id} ORDER BY ARRAY_ID"
         )
         weight_spectrum = subt_ws.getcol("WEIGHT_SPECTRUM")[snapshot_indices, :, pol][
             :, channel
@@ -114,7 +123,9 @@ def read_ms(
     frequency = frequencies[channel]
     logger.debug(f"Frequencies = {frequencies.shape}")
     logger.debug(f"Frequency = {frequency}")
-    logger.debug(f"NUM_CHAN = {np.array(spw.NUM_CHAN[0])}")
+    # casacure's table has no attribute-style column access (a pyrap
+    # convenience): NUM_CHAN must go through getcol().
+    logger.debug(f"NUM_CHAN = {np.array(spw.getcol('NUM_CHAN')[0])}")
 
     #
     #   Now calculate which indices we should use to get the required number of

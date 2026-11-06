@@ -1,17 +1,24 @@
 #
 # Unit test for the vectorized synthesize_uvw optimization.
-# Compares output of the optimized function against the original
-# per-antenna loop implementation to ensure correctness.
+# Compares output of the optimized function against a per-antenna loop
+# implementation to ensure correctness, and against golden values captured
+# from the old python-casacore (pyrap) implementation before it was removed.
 #
 
 import unittest
 import logging
 
 import numpy as np
-from pyrap.measures import measures
-from pyrap.quanta import quantity
+from astropy import units as u
+from astropy.time import Time
 
-from tart2ms.fixvis import baseline_index, dense2sparse_uvw, synthesize_uvw
+from tart2ms.fixvis import (
+    _TIME_SCALES,
+    _itrf_uvw_frame,
+    baseline_index,
+    dense2sparse_uvw,
+    synthesize_uvw,
+)
 
 logger = logging.getLogger("tart2ms")
 logger.addHandler(logging.NullHandler())
@@ -32,7 +39,12 @@ def _synthesize_uvw_original(
     posframe="ITRF",
     posunits=["m", "m", "m"],
 ):
-    """Original per-antenna loop implementation for comparison testing."""
+    """Loop reference implementation for comparison testing.
+
+    Identical algorithm to :func:`tart2ms.fixvis.synthesize_uvw` but with
+    explicit per-antenna and per-baseline Python loops instead of the
+    vectorized numpy operations, so the test isolates the vectorization.
+    """
     assert time.size == a1.size
     assert a1.size == a2.size
 
@@ -49,38 +61,23 @@ def _synthesize_uvw_original(
     padded_a1 = np.tile(antindices[:, 0], (1, ntime)).ravel()
     padded_a2 = np.tile(antindices[:, 1], (1, ntime)).ravel()
 
-    dm = measures()
-    epoch = dm.epoch(time_TZ, quantity(time[0], time_unit))
-    refdir = dm.direction(
-        stopctr_epoch,
-        quantity(phase_ref[0, 0], stopctr_units[0]),
-        quantity(phase_ref[0, 1], stopctr_units[1]),
-    )
-    obs = dm.position(
-        posframe,
-        quantity(station_ECEF[0, 0], posunits[0]),
-        quantity(station_ECEF[0, 1], posunits[1]),
-        quantity(station_ECEF[0, 2], posunits[2]),
-    )
+    ra = u.Quantity(phase_ref[0, 0], stopctr_units[0]).to_value(u.rad)
+    dec = u.Quantity(phase_ref[0, 1], stopctr_units[1]).to_value(u.rad)
+    scale = _TIME_SCALES.get(str(time_TZ).upper(), "utc")
 
-    dm.do_frame(obs)
-    dm.do_frame(refdir)
-    dm.do_frame(epoch)
     for ti, t in enumerate(unique_time):
-        epoch = dm.epoch(time_TZ, quantity(t, "s"))
-        dm.do_frame(epoch)
+        mjd = u.Quantity(t, time_unit).to_value(u.day)
+        if scale != "utc":
+            mjd = Time(mjd, format="mjd", scale=scale).utc.mjd
+        u_vec, v_vec, w_vec = _itrf_uvw_frame(mjd, ra, dec)
 
         station_uv = np.zeros_like(station_ECEF)
         for iapos, apos in enumerate(station_ECEF):
-            compuvw = dm.to_uvw(
-                dm.baseline(
-                    posframe,
-                    quantity([apos[0], station_ECEF[0, 0]], posunits[0]),
-                    quantity([apos[1], station_ECEF[0, 1]], posunits[1]),
-                    quantity([apos[2], station_ECEF[0, 2]], posunits[2]),
-                )
-            )
-            station_uv[iapos] = compuvw["xyz"].get_value()[0:3]
+            station_uv[iapos] = [
+                np.dot(apos, u_vec),
+                np.dot(apos, v_vec),
+                np.dot(apos, w_vec),
+            ]
         for bl in range(nbl):
             blants = antindices[bl]
             bla1 = blants[0]
@@ -93,6 +90,34 @@ def _synthesize_uvw_original(
             [padded_uvw, padded_time, padded_a1, padded_a2],
         )
     )
+
+
+# Golden UVW values captured from the old python-casacore (pyrap) implementation
+# (3 antennas, 2 timestamps, phase ref 1.53950448/-0.80037386, Signal Hill).
+# The new erfa/astropy frame agrees with pyrap's casacore chain to <~1.7 arcsec
+# of frame rotation, i.e. to well under 1e-4 m on these ~1 m baselines.
+_PYRAP_GOLDEN_UVW = [
+    [0.0, 0.0, 0.0],
+    [0.56190225, -0.610954835, -0.594558705],
+    [-0.805362649, -0.45141132, -0.436026175],
+    [0.0, 0.0, 0.0],
+    [-1.367264899, 0.159543515, 0.15853253],
+    [0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0],
+    [0.524077129, -0.62805505, -0.611056479],
+    [-0.832042513, -0.425740258, -0.411035871],
+    [0.0, 0.0, 0.0],
+    [-1.356119642, 0.202314792, 0.200020608],
+    [0.0, 0.0, 0.0],
+]
+_GOLDEN_STATION = np.array(
+    [
+        [-4486929.5, 584063.0, -4491740.0],
+        [-4486930.25, 584063.692820323, -4491740.0],
+        [-4486930.25, 584062.307179677, -4491740.0],
+    ]
+)
+_GOLDEN_TIMES = np.array([5071671511.991, 5071672111.991])
 
 
 class TestSynthesizeUVW(unittest.TestCase):
@@ -162,7 +187,11 @@ class TestSynthesizeUVW(unittest.TestCase):
         uvw_orig = result_orig["UVW"]
 
         max_diff = np.max(np.abs(uvw_opt - uvw_orig))
-        self.assertLess(max_diff, 1e-12,
+        # Vectorized numpy (BLAS/FMA summation order) and the per-antenna
+        # loop differ at float64 round-off on the ~1e6 m absolute station
+        # coordinates (~2e-9 m here), not at bit level: 1e-8 keeps the
+        # comparison far below any physically meaningful UVW error.
+        self.assertLess(max_diff, 1e-8,
                         f"UVW mismatch: max diff = {max_diff}")
 
         # Compare metadata
@@ -172,6 +201,36 @@ class TestSynthesizeUVW(unittest.TestCase):
                                        result_orig["ANTENNA1"])
         np.testing.assert_array_equal(result_opt["ANTENNA2"],
                                        result_orig["ANTENNA2"])
+
+    def test_matches_pyrap_golden(self):
+        """The new frame must reproduce the old python-casacore output.
+
+        Golden values were captured from pyrap/casacore's ``to_uvw()`` before
+        python-casacore was removed from the dependencies. The erfa/astropy
+        frame agrees with that chain to <~1.7 arcsec of frame rotation, i.e.
+        to ~1e-5 m on these ~1 m baselines (see fixvis._itrf_uvw_frame).
+        """
+        nant = 3
+        ntime = 2
+        timems = np.repeat(_GOLDEN_TIMES, nant)
+        a1 = np.tile(np.arange(nant), ntime)
+        a2 = np.tile(np.arange(nant), ntime)
+
+        result = synthesize_uvw(
+            station_ECEF=_GOLDEN_STATION,
+            time=timems,
+            a1=a1,
+            a2=a2,
+            phase_ref=np.array([[1.53950448, -0.80037386]]),
+            ack=False,
+        )
+        max_diff = np.max(
+            np.abs(result["UVW"] - np.array(_PYRAP_GOLDEN_UVW))
+        )
+        self.assertLess(
+            max_diff, 1e-4,
+            f"UVW drifted from the python-casacore reference: {max_diff}",
+        )
 
     def test_large_array(self):
         """Test with realistic array size (24 antennas, 50 timestamps)."""
@@ -199,7 +258,7 @@ class TestSynthesizeUVW(unittest.TestCase):
         uvw_orig = result_orig["UVW"]
 
         max_diff = np.max(np.abs(uvw_opt - uvw_orig))
-        self.assertLess(max_diff, 1e-12,
+        self.assertLess(max_diff, 1e-8,
                         f"UVW mismatch for 24-antenna array: max diff = {max_diff}")
 
     def test_single_timestamp(self):
@@ -225,7 +284,7 @@ class TestSynthesizeUVW(unittest.TestCase):
         )
 
         max_diff = np.max(np.abs(result_opt["UVW"] - result_orig["UVW"]))
-        self.assertLess(max_diff, 1e-12)
+        self.assertLess(max_diff, 1e-8)
 
     def test_different_phase_ref(self):
         """Test with a different phase reference direction."""
@@ -250,7 +309,7 @@ class TestSynthesizeUVW(unittest.TestCase):
         )
 
         max_diff = np.max(np.abs(result_opt["UVW"] - result_orig["UVW"]))
-        self.assertLess(max_diff, 1e-12)
+        self.assertLess(max_diff, 1e-8)
 
     def test_repeated_antenna_indices(self):
         """Test with non-consecutive antenna indices (sparse configuration)."""
@@ -280,7 +339,7 @@ class TestSynthesizeUVW(unittest.TestCase):
         )
 
         max_diff = np.max(np.abs(result_opt["UVW"] - result_orig["UVW"]))
-        self.assertLess(max_diff, 1e-12)
+        self.assertLess(max_diff, 1e-8)
 
 
 class TestDense2SparseUVW(unittest.TestCase):

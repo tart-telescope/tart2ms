@@ -3,11 +3,10 @@
 [![PyPI package](https://img.shields.io/badge/pip%20install-tart2ms-brightgreen)](https://pypi.org/project/tart2ms) [![version number](https://img.shields.io/pypi/v/tart2ms?color=green&label=version)](https://github.com/tart-telescope/tart2ms/releases) [![License](https://img.shields.io/github/license/tart-telescope/tart2ms)](https://github.com/tart-telescope/tart2ms/blob/master/LICENSE.txt)
 
 
-Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measurement set format. This module relies on the excellent dask-ms module as a helper to create the measurement sets. This packate requires python-casacore to be installed on your system
+Convert data from a [TART radio telescope](https://tart.elec.ac.nz) to measurement set format. This module relies on the excellent dask-ms module as a helper to create the measurement sets. The table backend is [casacure](https://github.com/tmolteno/casacure) — a pure-Rust implementation of the casacore table system, so no python-casacore or system casacore libraries are needed.
 
 ## Install
 
-    sudo aptitude install python3-casacore
     sudo pip3 install tart2ms
 
 ## Examples

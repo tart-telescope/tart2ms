@@ -11,7 +11,7 @@ from astropy.coordinates import (SkyCoord,
                                  AltAz,
                                  get_body)
 from astropy import units as u
-from casacore.tables import table
+from casacure.tables import table
 from astropy.constants import c
 
 from tart2ms.catalogs.catalog_reader import catalog_factory, radec_rad

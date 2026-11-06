@@ -29,7 +29,6 @@ from astropy import coordinates as ac
 from astropy.constants import R_earth
 from astropy.coordinates import Angle, EarthLocation, SkyCoord
 from astropy.time import Time
-from casacore.quanta import quantity
 from dask.diagnostics import ProgressBar
 from daskms import Dataset, xds_to_table
 from tart.imaging import calibration
@@ -100,11 +99,12 @@ iers_conf.auto_max_age = None
 #     patch exists precisely because the multiprocessing scheduler introspects
 #     objects during pickling).
 #
-# The casacore.measures code in fixvis.py (``synthesize_uvw``/``fixms``) is
-# documented as not thread-safe, but it never runs *through* the dask
-# scheduler - it is invoked in plain Python loops in the main thread - so the
-# dask-level scheduler is free to be threaded or synchronous without touching
-# that code path.
+# The UVW code in fixvis.py (``synthesize_uvw``/``fixms``) used to run
+# through casacore.measures, which is documented as not thread-safe; it has
+# since been reimplemented on erfa/astropy (no shared measures state), but it
+# still runs in plain Python loops in the main thread, so the dask-level
+# scheduler is free to be threaded or synchronous without touching that code
+# path.
 #
 # We therefore default to ``threads`` (parallel, reliable, and the fastest of
 # the local schedulers on the dask-ms write path) while still allowing the
@@ -222,21 +222,38 @@ class MSTable:
         return futures
 
 
+# MJD 0: 1858-11-17T00:00:00 -- the epoch Measurement Set TIME columns
+# count seconds from.
+_MJD_EPOCH = dt(1858, 11, 17)
+
+
 def timestamp_to_ms_epoch(t_stamp):
     """Convert an timestamp to seconds (epoch values)
         epoch suitable for using in a Measurement Set
 
     Parameters
     ----------
-    t_stamp : A timestamp object.
+    t_stamp : A timestamp object (datetime, or an ISO-8601 string).
 
     Returns
     -------
     t : float
       The epoch time ``t`` in seconds suitable for fields in
       measurement sets.
+
+    Notes
+    -----
+    Replaces the old pyrap ``quantity(t_stamp.isoformat()).get_value("s")``
+    call: casacure's quantity parser rejects timezone offsets in ISO
+    strings ("expected a unit name, found '-'"), so the conversion is done
+    with datetime arithmetic here (timezone-aware stamps are converted to
+    UTC; naive stamps are assumed UTC).
     """
-    return quantity(t_stamp.isoformat()).get_value("s")
+    if isinstance(t_stamp, str):
+        t_stamp = dt.fromisoformat(t_stamp.replace("Z", "+00:00"))
+    if isinstance(t_stamp, dt) and t_stamp.tzinfo is not None:
+        t_stamp = t_stamp.astimezone(timezone.utc).replace(tzinfo=None)
+    return (t_stamp - _MJD_EPOCH).total_seconds()
 
 
 def __baseline_flag_rows(baselines, flagged_antennas):
@@ -1479,12 +1496,17 @@ def __fetch_sources_via_client(
     positions, which drive both elevation filtering and the azel2radec
     conversion to J2000 done by predict_model and the SOURCE table writer.
 
-    Deliberately does NOT attach 'ra'/'dec': the client's
-    celestial_positions() returns *barycentric* ICRS directions, which put
-    every GNSS satellite at the Earth's barycentric position
-    (tart-telescope/catalogue issue #14), so all satellites predict at a
-    single wrong sky position (tart2ms issue #68). The az/el path here is
-    topocentric and verified correct.
+    Deliberately does NOT attach 'ra'/'dec': tart-catalogue-client's
+    celestial_positions() used to return *barycentric* ICRS directions,
+    which put every GNSS satellite at the Earth's barycentric position
+    (tart-telescope/catalogue issue #14, fixed in tart-catalogue-client
+    0.6.5 -- it now returns GCRS/topocentric directions). The az/el path
+    here stays the right one regardless: the SOURCE table and predict_model
+    want J2000 directions, which is exactly what azel2radec produces from
+    the verified-correct topocentric az/el (tart2ms issue #68). Using the
+    client's GCRS directions directly would swap one frame mismatch for
+    another; the GCRS route belongs to the tart2ms#56 geocentric-rephase
+    work.
     """
     client = CatalogueClient()
     sources = []

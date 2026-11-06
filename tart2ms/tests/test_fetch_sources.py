@@ -85,6 +85,38 @@ class TestFetchSourcesClient(unittest.TestCase):
             self.assertGreaterEqual(s["el"], -90.0)
             self.assertLessEqual(s["el"], 90.0)
 
+    def test_celestial_positions_not_barycentric(self):
+        """catalogue#14 regression: celestial_positions() must not collapse.
+
+        Before tart-catalogue-client 0.6.5, celestial_positions() returned
+        *barycentric* ICRS directions, putting every satellite within
+        ~0.03 deg of the Earth's own direction (tart-telescope/catalogue#14,
+        the root of tart2ms#68). The fix returns GCRS directions; distinct
+        GNSS satellites must therefore have widely separated directions.
+        This pins the tart-catalogue-client floor to >= 0.6.5 behaviour.
+        """
+        from astropy.coordinates import SkyCoord
+        import astropy.units as u
+        from tart_client import CatalogueClient
+
+        client = CatalogueClient()
+        pos = client.celestial_positions(dt=self.timestamps[0])
+        self.assertGreater(len(pos), 1, "no satellites returned")
+        coords = SkyCoord(
+            ra=[p["ra_hours"] for p in pos] * u.hourangle,
+            dec=[p["dec_degrees"] for p in pos] * u.deg,
+        )
+        max_sep = max(
+            coords[i].separation(coords[j]).deg
+            for i in range(len(coords) - 1)
+            for j in range(i + 1, len(coords))
+        )
+        self.assertGreater(
+            max_sep, 1.0,
+            f"satellite directions cluster (max separation {max_sep:.4f} "
+            f"deg) -- barycentric bug is back (catalogue#14)"
+        )
+
     def test_model_directions_spread_over_sky(self):
         """azel2radec on the fetched az/el must spread GNSS sources over the sky.
 

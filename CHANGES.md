@@ -1,6 +1,32 @@
 # Changes
 
-## Unreleased — Fix GNSS model positions (issue #68)
+## Unreleased — casacure: python-casacore removed
+
+- **python-casacore is gone** — the table/quanta imports are now `casacure.*`
+  (the pure-Rust backend, tmolteno/casacore), and the pyrap bindings the UVW
+  generator used are replaced:
+  - `synthesize_uvw`/`fixms` build their frame with erfa (ITRS→ICRS chain:
+    CIO precession-nutation, Earth rotation, polar motion) plus astropy's
+    apparent source direction (aberration/light deflection), validated against
+    python-casacore 3.8.1's `to_uvw()` to <~1.7 arcsec of frame rotation
+    (~1e-5 m on TART baselines — far below the tart2ms#56 barycentric
+    approximation). A golden test pins the old pyrap output; the
+    vectorized-vs-loop tests allow float64 round-off (~2e-9 m) instead of
+    demanding bit-identical results.
+  - `timestamp_to_ms_epoch` uses datetime arithmetic (casacure's `quantity()`
+    rejects timezone offsets in ISO strings).
+  - `casa_read_ms`: `keywordnames()`/`fieldnames()`/attribute column access
+    become `getkeywords()`/FIELD-subtable/`getcol()`; `query(sortlist=…,
+    columns=…)` becomes full TaQL via `table.taql()` (casacure's `query()`
+    takes only a WHERE clause).
+  - `fixms`: `QuantumUnits` normalised for casacure's array-valued keyword
+    records (`{'shape': …, 'array': …}`).
+- **Dependencies**: `python-casacore` removed; `casacure>=3.8.38` and
+  `pyerfa>=2.0` added; `dask-ms-2` floor raised to **0.2.34** (casacure is
+  always its table backend from that release, so MS writes work without
+  `DASK_MS_BACKEND`); `tart-catalogue-client` floor raised to **0.6.5** (the
+  barycentric `celestial_positions()` fix, tart-telescope/catalogue#14) with a
+  regression test pinning it. Suite 53/53.
 
 ## v0.9.5 — Fix GNSS model positions (issue #68)
 
