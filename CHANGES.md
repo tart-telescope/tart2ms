@@ -2,6 +2,8 @@
 
 ## Unreleased — casacure: python-casacore removed
 
+## v0.9.7 — casacure: python-casacore removed
+
 ## v0.9.6 — casacure: python-casacore removed
 
 - **python-casacore is gone** — the table/quanta imports are now `casacure.*`
