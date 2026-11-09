@@ -49,10 +49,11 @@ dependencies = [
     # it replaces python-casacore (casacore.tables / casacore.quanta imports)
     # and the pyrap bindings the old UVW generator used. dask-ms-2 pulls it
     # in as its table backend; declared directly because tart2ms imports it.
-    # >= 3.8.40: casacure <= 3.8.39 wrote string-array keywords (QuantumUnits)
-    # as {shape, array} sub-records and CASA refused the MS this tool writes
-    # (casacure#40, skarabina#14).
-    "casacure (>=3.8.40)",
+    # >= 3.8.41: 3.8.40 still wrote keyword records as *Fixed*, so CASA
+    # could not add keywords or a tiled column (clearcal's MODEL_DATA) to
+    # the MS this tool writes (casacure#41); 3.8.39 and older also wrote
+    # string-array keywords as {shape, array} sub-records (casacure#40).
+    "casacure (>=3.8.41)",
     # fixvis._itrf_uvw_frame uses erfa directly for the ITRS->ICRS rotation
     # (astropy already depends on pyerfa, declared here as it is imported).
     "pyerfa (>=2.0)",
